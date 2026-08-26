@@ -1,0 +1,175 @@
+{
+  "entities": {
+    "users": {
+      "title": "UserProfile",
+      "description": "Registered LMS users (Admins, Teachers/Guru, and Students/Siswa)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "guru", "siswa"] },
+        "avatar": { "type": "string" },
+        "identifierNumber": { "type": "string" },
+        "departmentOrClass": { "type": "string" },
+        "lastLogin": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] }
+      },
+      "required": ["id", "name", "email", "role", "avatar", "identifierNumber", "status"]
+    },
+    "materials": {
+      "title": "LearningMaterial",
+      "description": "Learning materials and documents uploaded by teachers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "fileType": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "uploadDate": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "description": { "type": "string" },
+        "downloadCount": { "type": "number" },
+        "fileName": { "type": "string" },
+        "fileUrl": { "type": "string" }
+      },
+      "required": ["id", "title", "subject", "fileType", "fileSize", "uploadDate", "teacherName"]
+    },
+    "quizzes": {
+      "title": "QuizExam",
+      "description": "Quizzes and exams created by teachers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "type": { "type": "string", "enum": ["quiz", "ujian"] },
+        "durationMinutes": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "deadline": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "questions": { "type": "array" },
+        "status": { "type": "string", "enum": ["active", "closed"] }
+      },
+      "required": ["id", "title", "subject", "type", "durationMinutes", "totalQuestions", "teacherName", "questions"]
+    },
+    "books": {
+      "title": "DigitalBook",
+      "description": "Digital books and e-books for students and teachers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "author": { "type": "string" },
+        "subject": { "type": "string" },
+        "totalPages": { "type": "number" },
+        "coverImage": { "type": "string" },
+        "description": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "rating": { "type": "number" },
+        "readCount": { "type": "number" },
+        "fileName": { "type": "string" },
+        "fileUrl": { "type": "string" }
+      },
+      "required": ["id", "title", "author", "subject", "totalPages", "coverImage", "description", "fileSize"]
+    },
+    "videos": {
+      "title": "LearningVideo",
+      "description": "Educational videos uploaded via YouTube or Google Drive link",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "duration": { "type": "string" },
+        "youtubeId": { "type": "string" },
+        "thumbnail": { "type": "string" },
+        "description": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "uploadDate": { "type": "string" },
+        "viewsCount": { "type": "number" },
+        "videoUrl": { "type": "string" },
+        "videoSourceType": { "type": "string" }
+      },
+      "required": ["id", "title", "subject", "duration", "description", "teacherName", "uploadDate"]
+    },
+    "announcements": {
+      "title": "SystemAnnouncement",
+      "description": "School wide announcements for admins, teachers, and students",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "targetRole": { "type": "string" },
+        "date": { "type": "string" },
+        "author": { "type": "string" },
+        "important": { "type": "boolean" }
+      },
+      "required": ["id", "title", "content", "targetRole", "date", "author"]
+    },
+    "attendance": {
+      "title": "AttendanceRecord",
+      "description": "Student attendance logs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentName": { "type": "string" },
+        "nisn": { "type": "string" },
+        "status": { "type": "string", "enum": ["hadir", "izin", "sakit", "alpa"] },
+        "time": { "type": "string" }
+      },
+      "required": ["id", "studentName", "nisn", "status"]
+    },
+    "schedules": {
+      "title": "ClassSchedule",
+      "description": "Class schedules by day and time",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "day": { "type": "string" },
+        "subject": { "type": "string" },
+        "className": { "type": "string" },
+        "timeStart": { "type": "string" },
+        "timeEnd": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "roomOrNotes": { "type": "string" },
+        "themeColor": { "type": "string" }
+      },
+      "required": ["id", "day", "subject", "className", "timeStart", "timeEnd", "teacherName"]
+    },
+    "quiz_submissions": {
+      "title": "StudentQuizSubmission",
+      "description": "Student exam submissions and scores",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "studentNisn": { "type": "string" },
+        "studentClass": { "type": "string" },
+        "quizId": { "type": "string" },
+        "quizTitle": { "type": "string" },
+        "subject": { "type": "string" },
+        "score": { "type": "number" },
+        "submittedAt": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "studentId", "studentName", "quizId", "score", "submittedAt"]
+    },
+    "settings": {
+      "title": "SchoolSettings",
+      "description": "School identity and portal branding settings",
+      "type": "object",
+      "properties": {
+        "schoolName": { "type": "string" },
+        "schoolTagline": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "loginBgUrl": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["schoolName", "schoolTagline"]
+    }
+  }
+}
