@@ -533,10 +533,24 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
             {/* Fullscreen Toggle */}
             <button
               onClick={() => setIsFullscreen(!isFullscreen)}
-              className="p-2 rounded-xl text-slate-600 hover:text-slate-900 bg-white border border-slate-200 hover:border-slate-300 cursor-pointer"
-              title={isFullscreen ? 'Keluar Layar Penuh' : 'Layar Penuh'}
+              className={`p-2 sm:px-3 sm:py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border shadow-sm ${
+                isFullscreen
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-500/20 ring-2 ring-amber-400/40'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 hover:text-blue-600 border-slate-200 hover:border-blue-300'
+              }`}
+              title={isFullscreen ? 'Keluar dari Mode Layar Penuh' : 'Mode Layar Penuh (Fokus Maksimal)'}
             >
-              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              {isFullscreen ? (
+                <>
+                  <Minimize2 className="w-4 h-4 text-white" />
+                  <span className="hidden sm:inline">Keluar Penuh</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-4 h-4 text-blue-600" />
+                  <span className="hidden sm:inline">Layar Penuh</span>
+                </>
+              )}
             </button>
 
             {/* Close Button */}
@@ -716,7 +730,7 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
         </div>
 
         {/* MAIN BODY CONTENT ACCORDING TO ACTIVE TAB */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100/70 flex flex-col items-center">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100/70 flex flex-col items-center smooth-scroll custom-reader-scrollbar">
           {/* TAB 1: MODUL & PDF / INTERACTIVE READER */}
           {activeTab === 'reader' && (
             <div className="w-full flex justify-center py-2">

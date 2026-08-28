@@ -19,7 +19,8 @@ import {
   AttendanceRecord,
   ClassSchedule,
   StudentQuizSubmission,
-  SchoolSettings
+  SchoolSettings,
+  ContentLearningProgress
 } from '../types';
 import { 
   MOCK_MATERIALS,
@@ -53,6 +54,7 @@ const ATTENDANCE_COL = 'attendance';
 const SCHEDULES_COL = 'schedules';
 const SUBMISSIONS_COL = 'quiz_submissions';
 const SETTINGS_COL = 'settings';
+const STUDENT_PROGRESS_COL = 'student_progress';
 
 const DELETED_IDS_KEY = 'edusmart_lms_deleted_ids';
 const SETTINGS_LOCAL_KEY = 'edusmart_lms_school_settings';
@@ -641,6 +643,97 @@ export async function addSubmissionToDb(submission: StudentQuizSubmission) {
   }
 }
 
+// Student Learning Progress Functions
+export function getLocalStudentProgress(studentId: string): Record<string, ContentLearningProgress> {
+  try {
+    const raw = localStorage.getItem(`edusmart_student_progress_${studentId}`);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+export function saveLocalStudentProgress(studentId: string, progressMap: Record<string, ContentLearningProgress>) {
+  try {
+    localStorage.setItem(`edusmart_student_progress_${studentId}`, JSON.stringify(progressMap));
+  } catch (e) {
+    console.warn('Failed to save student progress to localStorage:', e);
+  }
+}
+
+export function subscribeStudentProgress(
+  studentId: string,
+  callback: (progress: Record<string, ContentLearningProgress>) => void
+) {
+  if (!studentId) {
+    callback({});
+    return () => {};
+  }
+
+  const localInitial = getLocalStudentProgress(studentId);
+  callback(localInitial);
+
+  const docRef = doc(db, STUDENT_PROGRESS_COL, studentId);
+  return onSnapshot(docRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const serverItems = (data?.progressItems || {}) as Record<string, ContentLearningProgress>;
+      const localItems = getLocalStudentProgress(studentId);
+      const merged = { ...localItems, ...serverItems };
+      saveLocalStudentProgress(studentId, merged);
+      callback(merged);
+    } else {
+      const local = getLocalStudentProgress(studentId);
+      callback(local);
+    }
+  }, (err) => {
+    console.warn('Firestore student progress snapshot error:', err);
+    callback(getLocalStudentProgress(studentId));
+  });
+}
+
+export async function updateStudentContentProgress(
+  studentId: string,
+  progressItem: ContentLearningProgress
+) {
+  if (!studentId || !progressItem.contentId) return;
+
+  const key = `${progressItem.contentType}_${progressItem.contentId}`;
+  const currentLocal = getLocalStudentProgress(studentId);
+  const updatedLocal = {
+    ...currentLocal,
+    [key]: {
+      ...progressItem,
+      lastAccessedAt: new Date().toISOString()
+    }
+  };
+  saveLocalStudentProgress(studentId, updatedLocal);
+
+  // If this is a material, also keep studied materials array in sync for backward compatibility
+  if (progressItem.contentType === 'material') {
+    try {
+      const studiedList: string[] = JSON.parse(localStorage.getItem('edusmart_studied_materials') || '[]');
+      if (progressItem.isCompleted && !studiedList.includes(progressItem.contentId)) {
+        localStorage.setItem('edusmart_studied_materials', JSON.stringify([...studiedList, progressItem.contentId]));
+      } else if (!progressItem.isCompleted && studiedList.includes(progressItem.contentId)) {
+        localStorage.setItem('edusmart_studied_materials', JSON.stringify(studiedList.filter(id => id !== progressItem.contentId)));
+      }
+    } catch {}
+  }
+
+  try {
+    await setDoc(doc(db, STUDENT_PROGRESS_COL, studentId), {
+      studentId,
+      progressItems: updatedLocal,
+      lastUpdated: new Date().toISOString()
+    }, { merge: true });
+  } catch (err) {
+    console.warn('Firestore updateStudentContentProgress error:', err);
+  }
+}
+
+
 // School Branding & System Settings
 export function getLocalSchoolSettings(): SchoolSettings {
   try {
@@ -769,7 +862,8 @@ export async function getFullDatabaseBackup(): Promise<Record<string, any>> {
     schedules: [],
     attendance: [],
     quiz_submissions: [],
-    settings: []
+    settings: [],
+    student_progress: []
   };
 
   const collectionsList = [
@@ -783,6 +877,7 @@ export async function getFullDatabaseBackup(): Promise<Record<string, any>> {
     { key: 'attendance', col: ATTENDANCE_COL },
     { key: 'quiz_submissions', col: SUBMISSIONS_COL },
     { key: 'settings', col: SETTINGS_COL },
+    { key: 'student_progress', col: STUDENT_PROGRESS_COL },
   ];
 
   for (const item of collectionsList) {
@@ -821,6 +916,7 @@ export async function restoreFullDatabaseBackup(backupPayload: any): Promise<{ s
       attendance: ATTENDANCE_COL,
       quiz_submissions: SUBMISSIONS_COL,
       settings: SETTINGS_COL,
+      student_progress: STUDENT_PROGRESS_COL,
     };
 
     for (const [key, colName] of Object.entries(collectionsMapping)) {

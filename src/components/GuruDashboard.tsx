@@ -644,13 +644,16 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
 
   // Filtered Students
   const filteredStudents = useMemo(() => {
-    if (!studentSearchQuery.trim()) return studentsList;
+    if (!studentSearchQuery || !studentSearchQuery.trim()) return studentsList;
     const q = studentSearchQuery.toLowerCase();
-    return studentsList.filter(s => 
-      s.name.toLowerCase().includes(q) || 
-      s.identifierNumber.toLowerCase().includes(q) ||
-      (s.departmentOrClass && s.departmentOrClass.toLowerCase().includes(q))
-    );
+    return studentsList.filter(s => {
+      if (!s) return false;
+      return (
+        (s.name || '').toLowerCase().includes(q) || 
+        (s.identifierNumber || '').toLowerCase().includes(q) ||
+        (s.departmentOrClass ? s.departmentOrClass.toLowerCase().includes(q) : false)
+      );
+    });
   }, [studentsList, studentSearchQuery]);
 
   const schoolName = schoolSettings?.schoolName || 'EduSmart LMS';
@@ -1558,10 +1561,10 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl p-6 shadow-2xl text-slate-200 relative my-8"
+            className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl p-6 shadow-2xl text-slate-200 relative my-8 max-h-[90vh] flex flex-col"
           >
             {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800/80 mb-5">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800/80 mb-5 shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-indigo-600/30 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
                   <Book className="w-4 h-4" />
@@ -1570,13 +1573,13 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
               </div>
               <button 
                 onClick={() => setShowBookModal(false)}
-                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleAddBookSubmit} className="space-y-4">
+            <form onSubmit={handleAddBookSubmit} className="flex-1 overflow-y-auto custom-scrollbar smooth-scroll pr-1.5 space-y-4">
               {/* Dropzone File PDF */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
@@ -1685,18 +1688,18 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
               </div>
 
               {/* Buttons */}
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800/80">
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800/80 shrink-0 sticky bottom-0 bg-slate-900 pb-1">
                 <button
                   type="button"
                   onClick={() => setShowBookModal(false)}
-                  className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 bg-slate-800/80 hover:bg-slate-700 hover:text-white transition"
+                  className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 bg-slate-800/80 hover:bg-slate-700 hover:text-white transition cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isUploading}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-semibold text-white shadow-lg transition flex items-center gap-2 ${
+                  className={`px-5 py-2.5 rounded-xl text-xs font-semibold text-white shadow-lg transition flex items-center gap-2 cursor-pointer ${
                     isUploading 
                       ? 'bg-indigo-500/70 cursor-wait' 
                       : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/30'
@@ -1719,21 +1722,21 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl p-6 shadow-2xl text-slate-200 relative my-8"
+            className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl p-6 shadow-2xl text-slate-200 relative my-8 max-h-[90vh] flex flex-col"
           >
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800/80 mb-5">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800/80 mb-5 shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-blue-600/30 text-blue-400 flex items-center justify-center border border-blue-500/30">
                   <FileUp className="w-4 h-4" />
                 </div>
                 <h3 className="text-base font-bold text-white">Tambah Bahan Ajar PDF</h3>
               </div>
-              <button onClick={() => setShowMaterialModal(false)} className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white">
+              <button onClick={() => setShowMaterialModal(false)} className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleAddMaterialSubmit} className="space-y-4">
+            <form onSubmit={handleAddMaterialSubmit} className="flex-1 overflow-y-auto custom-scrollbar smooth-scroll pr-1.5 space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">Unggah Berkas PDF Materi</label>
                 <label className="border-2 border-dashed border-slate-700/80 hover:border-blue-500/60 rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer bg-slate-950/40 transition group">
@@ -1791,14 +1794,14 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800/80">
-                <button type="button" onClick={() => setShowMaterialModal(false)} className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 bg-slate-800/80 hover:bg-slate-700">
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800/80 shrink-0 sticky bottom-0 bg-slate-900 pb-1">
+                <button type="button" onClick={() => setShowMaterialModal(false)} className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 bg-slate-800/80 hover:bg-slate-700 cursor-pointer">
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isUploading}
-                  className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 transition"
+                  className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 transition cursor-pointer"
                 >
                   {isUploading ? "Sedang Menyimpan..." : "Simpan Bahan Ajar"}
                 </button>
@@ -1816,19 +1819,19 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl p-6 shadow-2xl text-slate-200 relative my-8"
+            className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl p-6 shadow-2xl text-slate-200 relative my-8 max-h-[90vh] flex flex-col"
           >
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800/80 mb-5">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800/80 mb-5 shrink-0">
               <div className="flex items-center gap-2.5">
                 <Award className="w-5 h-5 text-emerald-400" />
                 <h3 className="text-base font-bold text-white">Buat Quiz / Ujian Baru</h3>
               </div>
-              <button onClick={() => setShowQuizModal(false)} className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white">
+              <button onClick={() => setShowQuizModal(false)} className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleAddQuizSubmit} className="space-y-4">
+            <form onSubmit={handleAddQuizSubmit} className="flex-1 overflow-y-auto custom-scrollbar smooth-scroll pr-1.5 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Judul Quiz / Ujian</label>
@@ -1885,7 +1888,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                   <span className="text-xs font-bold text-white">Daftar Soal ({quizQuestions.length})</span>
                 </div>
 
-                <div className="space-y-2 max-h-48 overflow-y-auto p-3 bg-slate-950/60 rounded-2xl border border-slate-800/60">
+                <div className="space-y-2 max-h-48 overflow-y-auto p-3 bg-slate-950/60 rounded-2xl border border-slate-800/60 custom-scrollbar">
                   {quizQuestions.map((q, idx) => (
                     <div key={q.id || idx} className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-xs flex justify-between gap-2">
                       <div className="space-y-1">
@@ -1895,7 +1898,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => setQuizQuestions(quizQuestions.filter((_, i) => i !== idx))}
-                        className="text-rose-400 hover:text-rose-300 text-xs"
+                        className="text-rose-400 hover:text-rose-300 text-xs cursor-pointer"
                       >
                         Hapus
                       </button>
@@ -1932,7 +1935,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                     <button
                       type="button"
                       onClick={handleAddQuestionToQuiz}
-                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold"
+                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold cursor-pointer"
                     >
                       + Tambahkan Soal
                     </button>
@@ -1940,11 +1943,11 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800/80">
-                <button type="button" onClick={() => setShowQuizModal(false)} className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 bg-slate-800">
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800/80 shrink-0 sticky bottom-0 bg-slate-900 pb-1">
+                <button type="button" onClick={() => setShowQuizModal(false)} className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 bg-slate-800 cursor-pointer">
                   Batal
                 </button>
-                <button type="submit" className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500">
+                <button type="submit" className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 cursor-pointer">
                   Simpan Quiz
                 </button>
               </div>
@@ -1957,13 +1960,13 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
       {/* MODAL 4: TAMBAH VIDEO PEMBELAJARAN                                        */}
       {/* ========================================================================= */}
       {showVideoModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl text-slate-200">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md overflow-y-auto">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl text-slate-200 relative my-8 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4 shrink-0">
               <h3 className="text-base font-bold text-white">Tambah Video Pembelajaran</h3>
-              <button onClick={() => setShowVideoModal(false)} className="p-1 rounded-lg bg-slate-800"><X className="w-4 h-4" /></button>
+              <button onClick={() => setShowVideoModal(false)} className="p-1 rounded-lg bg-slate-800 cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
-            <form onSubmit={handleAddVideoSubmit} className="space-y-3">
+            <form onSubmit={handleAddVideoSubmit} className="flex-1 overflow-y-auto custom-scrollbar smooth-scroll pr-1.5 space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Judul Video</label>
                 <input type="text" required placeholder="Contoh: Eksperimen Gaya Gravitasi" value={vidTitle} onChange={e => setVidTitle(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
@@ -1988,9 +1991,9 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Deskripsi Video</label>
                 <textarea rows={2} placeholder="Penjelasan singkat video..." value={vidDesc} onChange={e => setVidDesc(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowVideoModal(false)} className="px-4 py-2 rounded-xl text-xs bg-slate-800">Batal</button>
-                <button type="submit" className="px-4 py-2 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white">Simpan Video</button>
+              <div className="flex justify-end gap-2 pt-2 shrink-0 sticky bottom-0 bg-slate-900 pb-1">
+                <button type="button" onClick={() => setShowVideoModal(false)} className="px-4 py-2 rounded-xl text-xs bg-slate-800 cursor-pointer">Batal</button>
+                <button type="submit" className="px-4 py-2 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white cursor-pointer">Simpan Video</button>
               </div>
             </form>
           </motion.div>
@@ -2001,15 +2004,15 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
       {/* MODAL 5: TAMBAH SISWA MANUAL                                              */}
       {/* ========================================================================= */}
       {showGenerateSiswaModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl text-slate-200">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md overflow-y-auto">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl text-slate-200 relative my-8 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4 shrink-0">
               <h3 className="text-base font-bold text-white">Buat Akun Siswa Baru</h3>
-              <button onClick={() => { setShowGenerateSiswaModal(false); setCreatedSiswaCredential(null); }} className="p-1 rounded-lg bg-slate-800"><X className="w-4 h-4" /></button>
+              <button onClick={() => { setShowGenerateSiswaModal(false); setCreatedSiswaCredential(null); }} className="p-1 rounded-lg bg-slate-800 cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
 
             {createdSiswaCredential ? (
-              <div className="space-y-4">
+              <div className="space-y-4 overflow-y-auto custom-scrollbar flex-1 pr-1">
                 <div className="p-4 bg-emerald-950/60 border border-emerald-800 rounded-2xl text-xs space-y-2">
                   <p className="font-bold text-emerald-300">✅ Akun Berhasil Dibuat!</p>
                   <p className="text-slate-300">Nama: <strong>{createdSiswaCredential.name}</strong></p>
@@ -2022,20 +2025,20 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                     setIsCopied(true);
                     setTimeout(() => setIsCopied(false), 2000);
                   }}
-                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2"
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Copy className="w-3.5 h-3.5" />
                   <span>{isCopied ? 'Tersalin ke Clipboard!' : 'Salin Info Akun'}</span>
                 </button>
                 <button
                   onClick={() => setCreatedSiswaCredential(null)}
-                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold"
+                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold cursor-pointer"
                 >
                   + Tambah Siswa Lain
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleGenerateStudentSubmit} className="space-y-3">
+              <form onSubmit={handleGenerateStudentSubmit} className="flex-1 overflow-y-auto custom-scrollbar smooth-scroll pr-1.5 space-y-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Nama Lengkap Siswa</label>
                   <input type="text" required placeholder="Contoh: Ahmad Fauzan" value={genSiswaName} onChange={e => setGenSiswaName(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
@@ -2052,9 +2055,9 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Password Awal</label>
                   <input type="text" placeholder="123456" value={genSiswaPassword} onChange={e => setGenSiswaPassword(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
                 </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button type="button" onClick={() => setShowGenerateSiswaModal(false)} className="px-4 py-2 rounded-xl text-xs bg-slate-800">Batal</button>
-                  <button type="submit" className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white">Simpan Akun Siswa</button>
+                <div className="flex justify-end gap-2 pt-2 shrink-0 sticky bottom-0 bg-slate-900 pb-1">
+                  <button type="button" onClick={() => setShowGenerateSiswaModal(false)} className="px-4 py-2 rounded-xl text-xs bg-slate-800 cursor-pointer">Batal</button>
+                  <button type="submit" className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer">Simpan Akun Siswa</button>
                 </div>
               </form>
             )}
@@ -2066,13 +2069,13 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
       {/* MODAL 6: UPLOAD EXCEL SISWA                                               */}
       {/* ========================================================================= */}
       {showUploadSiswaExcelModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl text-slate-200">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md overflow-y-auto">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl text-slate-200 relative my-8 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4 shrink-0">
               <h3 className="text-base font-bold text-white">Upload Data Siswa (.xlsx)</h3>
-              <button onClick={() => setShowUploadSiswaExcelModal(false)} className="p-1 rounded-lg bg-slate-800"><X className="w-4 h-4" /></button>
+              <button onClick={() => setShowUploadSiswaExcelModal(false)} className="p-1 rounded-lg bg-slate-800 cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar smooth-scroll pr-1.5">
               <p className="text-xs text-slate-400">
                 Unggah berkas Excel dengan header kolom <strong>Nama Siswa</strong>, <strong>NISN</strong>, dan <strong>Kelas</strong>.
               </p>
@@ -2082,8 +2085,8 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                 <span className="text-xs font-bold text-white">Klik untuk memilih file Excel</span>
                 <span className="text-[10px] text-slate-500">.xlsx / .xls</span>
               </label>
-              <div className="flex justify-end">
-                <button onClick={() => setShowUploadSiswaExcelModal(false)} className="px-4 py-2 rounded-xl text-xs bg-slate-800">Tutup</button>
+              <div className="flex justify-end pt-2">
+                <button onClick={() => setShowUploadSiswaExcelModal(false)} className="px-4 py-2 rounded-xl text-xs bg-slate-800 cursor-pointer">Tutup</button>
               </div>
             </div>
           </motion.div>
@@ -2094,11 +2097,11 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
       {/* MODAL 7: EDIT SISWA                                                       */}
       {/* ========================================================================= */}
       {editingStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl text-slate-200">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md overflow-y-auto">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl text-slate-200 relative my-8 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4 shrink-0">
               <h3 className="text-base font-bold text-white">Edit Data Siswa</h3>
-              <button onClick={() => setEditingStudent(null)} className="p-1 rounded-lg bg-slate-800"><X className="w-4 h-4" /></button>
+              <button onClick={() => setEditingStudent(null)} className="p-1 rounded-lg bg-slate-800 cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
             <form onSubmit={async (e) => {
               e.preventDefault();
@@ -2113,7 +2116,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
               setStudentsList(prev => prev.map(s => s.id === updated.id ? updated : s));
               setEditingStudent(null);
               triggerToast('Data siswa berhasil diperbarui!');
-            }} className="space-y-3">
+            }} className="flex-1 overflow-y-auto custom-scrollbar smooth-scroll pr-1.5 space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Nama Siswa</label>
                 <input type="text" required value={editName} onChange={e => setEditName(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
@@ -2133,9 +2136,9 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                   <option value="inactive">Nonaktif</option>
                 </select>
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setEditingStudent(null)} className="px-4 py-2 rounded-xl text-xs bg-slate-800">Batal</button>
-                <button type="submit" className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white">Simpan Perubahan</button>
+              <div className="flex justify-end gap-2 pt-2 shrink-0 sticky bottom-0 bg-slate-900 pb-1">
+                <button type="button" onClick={() => setEditingStudent(null)} className="px-4 py-2 rounded-xl text-xs bg-slate-800 cursor-pointer">Batal</button>
+                <button type="submit" className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer">Simpan Perubahan</button>
               </div>
             </form>
           </motion.div>

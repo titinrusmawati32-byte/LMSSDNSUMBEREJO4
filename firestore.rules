@@ -1,8 +1,64 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helper Functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Default catch-all
     match /{document=**} {
       allow read, write: if true;
     }
+
+    // Explicit Collection Rules
+    match /users/{userId} {
+      allow read, write: if isValidId(userId);
+    }
+
+    match /materials/{materialId} {
+      allow read, write: if isValidId(materialId);
+    }
+
+    match /quizzes/{quizId} {
+      allow read, write: if isValidId(quizId);
+    }
+
+    match /books/{bookId} {
+      allow read, write: if isValidId(bookId);
+    }
+
+    match /file_chunks/{chunkId} {
+      allow read, write: if isValidId(chunkId);
+    }
+
+    match /videos/{videoId} {
+      allow read, write: if isValidId(videoId);
+    }
+
+    match /announcements/{announcementId} {
+      allow read, write: if isValidId(announcementId);
+    }
+
+    match /attendance/{attendanceId} {
+      allow read, write: if isValidId(attendanceId);
+    }
+
+    match /schedules/{scheduleId} {
+      allow read, write: if isValidId(scheduleId);
+    }
+
+    match /quiz_submissions/{submissionId} {
+      allow read, write: if isValidId(submissionId);
+    }
+
+    match /settings/{settingId} {
+      allow read, write: if isValidId(settingId);
+    }
+
+    match /student_progress/{progressId} {
+      allow read, write: if isValidId(progressId);
+    }
   }
 }
+

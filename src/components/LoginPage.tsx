@@ -81,8 +81,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         const customPassword = isDbPassCustom ? dbPassVal : (localStorage.getItem('edusmart_admin_custom_password') || masterPassword);
         
         if (
-          (trimmedId === customUsername.toLowerCase() && trimmedPass === customPassword) ||
-          (trimmedId === masterUsername.toLowerCase() && trimmedPass === masterPassword)
+          (trimmedId === (customUsername || '').toLowerCase() && trimmedPass === customPassword) ||
+          (trimmedId === (masterUsername || '').toLowerCase() && trimmedPass === masterPassword)
         ) {
           const adminUser = dbAdminUser || {
             id: 'usr-1',
@@ -94,7 +94,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             lastLogin: 'Baru saja',
             status: 'active' as const
           };
-          adminUser.identifierNumber = trimmedId === masterUsername.toLowerCase() ? masterUsername : customUsername;
+          adminUser.identifierNumber = trimmedId === (masterUsername || '').toLowerCase() ? masterUsername : customUsername;
           onLoginSuccess(adminUser);
           return;
         } else {

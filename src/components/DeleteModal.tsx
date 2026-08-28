@@ -49,8 +49,8 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
           <div className="space-y-2">
             <h3 className="text-lg font-bold text-white">Konfirmasi Penghapusan</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Apakah Anda yakin ingin menghapus {itemType.toLowerCase()}{' '}
-              <span className="font-semibold text-rose-400 break-words">"{itemTitle}"</span>? Tindakan ini akan menghapus data secara permanen dari database LMS.
+              Apakah Anda yakin ingin menghapus {(itemType || 'item').toLowerCase()}{' '}
+              <span className="font-semibold text-rose-400 break-words">"{itemTitle || 'data ini'}"</span>? Tindakan ini akan menghapus data secara permanen dari database LMS.
             </p>
           </div>
 

@@ -153,12 +153,14 @@ export const GuruScheduleManager: React.FC<GuruScheduleManagerProps> = ({
 
   // Filtered schedules
   const filtered = schedules.filter(sch => {
+    if (!sch) return false;
     const matchDay = selectedDayFilter === 'ALL' || sch.day === selectedDayFilter;
+    const q = (searchQuery || '').toLowerCase();
     const matchSearch = 
-      sch.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      sch.teacherName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      sch.className.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (sch.roomOrNotes && sch.roomOrNotes.toLowerCase().includes(searchQuery.toLowerCase()));
+      (sch.subject || '').toLowerCase().includes(q) ||
+      (sch.teacherName || '').toLowerCase().includes(q) ||
+      (sch.className || '').toLowerCase().includes(q) ||
+      (sch.roomOrNotes ? sch.roomOrNotes.toLowerCase().includes(q) : false);
     return matchDay && matchSearch;
   });
 

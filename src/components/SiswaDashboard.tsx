@@ -7,15 +7,17 @@ import {
   Image as ImageIcon, Search, ChevronRight, UserCheck, Flame, Trophy, Printer,
   MapPin, User
 } from 'lucide-react';
-import { UserProfile, LearningMaterial, QuizExam, DigitalBook, LearningVideo, SystemAnnouncement, ClassSchedule, ScheduleDay, SchoolSettings, StudentQuizSubmission } from '../types';
+import { UserProfile, LearningMaterial, QuizExam, DigitalBook, LearningVideo, SystemAnnouncement, ClassSchedule, ScheduleDay, SchoolSettings, StudentQuizSubmission, ContentLearningProgress } from '../types';
 import { MOCK_COURSES, MOCK_ASSIGNMENTS } from '../data/mockData';
-import { subscribeUsers, subscribeSubmissions } from '../lib/lmsDb';
+import { subscribeUsers, subscribeSubmissions, subscribeStudentProgress, updateStudentContentProgress, getLocalStudentProgress } from '../lib/lmsDb';
 import { QuizExamModal } from './QuizExamModal';
 import { BookReaderModal } from './BookReaderModal';
 import { VideoPlayerModal } from './VideoPlayerModal';
 import { UserProfileModal } from './UserProfileModal';
 import { MaterialDetailModal } from './MaterialDetailModal';
 import { FeatureHeaderBanner } from './FeatureHeaderBanner';
+import { StudentLearningProgressWidget } from './StudentLearningProgressWidget';
+import { LearningProgressDetailModal } from './LearningProgressDetailModal';
 
 interface SiswaDashboardProps {
   currentUser: UserProfile;
@@ -115,10 +117,20 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
   // Modal active objects
   const [selectedQuiz, setSelectedQuiz] = useState<QuizExam | null>(null);
   const [selectedBook, setSelectedBook] = useState<DigitalBook | null>(null);
+  const [selectedBookTargetPage, setSelectedBookTargetPage] = useState<number | undefined>(undefined);
   const [selectedMaterialForReader, setSelectedMaterialForReader] = useState<LearningMaterial | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<LearningVideo | null>(null);
+  const [showProgressDetailModal, setShowProgressDetailModal] = useState<boolean>(false);
 
-  // Studied Materials Tracking
+  // Filter states for progress tabs
+  const [materialProgressFilter, setMaterialProgressFilter] = useState<'ALL' | 'UNSTUDIED' | 'COMPLETED'>('ALL');
+  const [bookProgressFilter, setBookProgressFilter] = useState<'ALL' | 'READING' | 'COMPLETED'>('ALL');
+
+  // Studied Materials Tracking & Real-Time Student Progress Map
+  const [studentProgressMap, setStudentProgressMap] = useState<Record<string, ContentLearningProgress>>(() => {
+    return getLocalStudentProgress(currentUser.id);
+  });
+
   const [studiedMaterialIds, setStudiedMaterialIds] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('edusmart_studied_materials') || '[]');
@@ -127,19 +139,69 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
     }
   });
 
-  const handleToggleStudiedMaterial = (materialId: string, isStudied: boolean) => {
-    setStudiedMaterialIds(prev => {
-      let updated: string[];
-      if (isStudied) {
-        updated = Array.from(new Set([...prev, materialId]));
-      } else {
-        updated = prev.filter(id => id !== materialId);
+  // Subscribe to real-time student progress
+  React.useEffect(() => {
+    if (!currentUser?.id) return;
+    const unsub = subscribeStudentProgress(currentUser.id, (prog) => {
+      if (prog) {
+        setStudentProgressMap(prog);
+        const completedIds = Object.values(prog)
+          .filter(item => item.contentType === 'material' && item.isCompleted)
+          .map(item => item.contentId);
+        if (completedIds.length > 0) {
+          setStudiedMaterialIds(prev => Array.from(new Set([...prev, ...completedIds])));
+        }
       }
-      try {
-        localStorage.setItem('edusmart_studied_materials', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
     });
+    return () => unsub();
+  }, [currentUser.id]);
+
+  // Helper to record learning progress in real-time
+  const handleRecordProgress = (
+    contentId: string,
+    contentType: 'material' | 'book' | 'video' | 'quiz',
+    title: string,
+    subject: string,
+    percent: number,
+    isCompleted: boolean,
+    currentPage?: number,
+    totalPages?: number,
+    score?: number
+  ) => {
+    const item: ContentLearningProgress = {
+      contentId,
+      contentType,
+      title,
+      subject,
+      percent: Math.min(100, Math.max(0, percent)),
+      isCompleted,
+      currentPage,
+      totalPages,
+      score,
+      lastAccessedAt: new Date().toISOString()
+    };
+    updateStudentContentProgress(currentUser.id, item);
+
+    // If it's a material completion, sync studiedMaterialIds
+    if (contentType === 'material') {
+      if (isCompleted) {
+        setStudiedMaterialIds(prev => Array.from(new Set([...prev, contentId])));
+      } else {
+        setStudiedMaterialIds(prev => prev.filter(id => id !== contentId));
+      }
+    }
+  };
+
+  const handleToggleStudiedMaterial = (materialId: string, isStudied: boolean) => {
+    const targetMat = materials.find(m => m.id === materialId);
+    handleRecordProgress(
+      materialId,
+      'material',
+      targetMat?.title || 'Bahan Ajar',
+      targetMat?.subject || 'Umum',
+      isStudied ? 100 : 0,
+      isStudied
+    );
   };
 
   // Group schedules by subject to dynamically compute Mata Pelajaran
@@ -164,12 +226,13 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
     const roomSummary = Array.from(new Set(sessions.map(s => s.roomOrNotes).filter(Boolean))).join(', ') || 'Ruang Kelas';
 
     // Normalized keyword search for related items
-    const normSubject = subjectName.toLowerCase().replace(/[^a-z0-9]/g, ' ');
+    const normSubject = (subjectName || '').toLowerCase().replace(/[^a-z0-9]/g, ' ');
     const subjectKeywords = normSubject.split(' ').filter(k => k.length > 2);
 
-    const matchesItem = (itemText: string) => {
+    const matchesItem = (itemText?: string) => {
+      if (!itemText) return false;
       const norm = itemText.toLowerCase().replace(/[^a-z0-9]/g, ' ');
-      if (norm.includes(normSubject) || normSubject.includes(norm)) return true;
+      if (norm.includes(normSubject) || (normSubject && normSubject.includes(norm))) return true;
       return subjectKeywords.some(kw => norm.includes(kw));
     };
 
@@ -178,19 +241,43 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
     const relatedVideos = videos.filter(v => matchesItem(v.subject) || matchesItem(v.title));
     const relatedBooks = books.filter(b => matchesItem(b.subject) || matchesItem(b.title));
 
-    // Dynamic progress calculation based on student achievements and schedule
+    // Dynamic quiz submissions & scores for this subject
     const completedQuizzes = relatedQuizzes.filter(q => q.completedScore !== undefined);
     const totalQuizScore = completedQuizzes.reduce((acc, q) => acc + (q.completedScore || 0), 0);
     const avgScore = completedQuizzes.length > 0 ? Math.round(totalQuizScore / completedQuizzes.length) : null;
 
-    let progressPercentage = 68; // Base semester progress
-    if (relatedQuizzes.length > 0) {
-      const quizRatio = completedQuizzes.length / relatedQuizzes.length;
-      progressPercentage = Math.round(50 + (quizRatio * 40) + ((avgScore || 75) / 100 * 10));
+    // Exact dynamic progress calculation for this subject based on persistent progress
+    const completedMatCount = relatedMaterials.filter(m => studentProgressMap[`material_${m.id}`]?.isCompleted || studiedMaterialIds.includes(m.id)).length;
+    const completedQuizCount = completedQuizzes.length;
+    const totalSubjectItems = relatedMaterials.length + relatedQuizzes.length + relatedBooks.length + relatedVideos.length;
+    
+    let progressPercentage = 0;
+    if (totalSubjectItems > 0) {
+      let earnedPoints = 0;
+      let maxPoints = 0;
+      
+      if (relatedMaterials.length > 0) {
+        maxPoints += relatedMaterials.length * 40;
+        earnedPoints += completedMatCount * 40;
+      }
+      if (relatedQuizzes.length > 0) {
+        maxPoints += relatedQuizzes.length * 35;
+        earnedPoints += completedQuizCount * 35;
+      }
+      if (relatedBooks.length > 0) {
+        maxPoints += relatedBooks.length * 15;
+        const booksDone = relatedBooks.filter(b => studentProgressMap[`book_${b.id}`]?.isCompleted || (studentProgressMap[`book_${b.id}`]?.percent || 0) >= 50).length;
+        earnedPoints += booksDone * 15;
+      }
+      if (relatedVideos.length > 0) {
+        maxPoints += relatedVideos.length * 10;
+        const vidsDone = relatedVideos.filter(v => studentProgressMap[`video_${v.id}`]?.isCompleted || (studentProgressMap[`video_${v.id}`]?.percent || 0) >= 80).length;
+        earnedPoints += vidsDone * 10;
+      }
+      progressPercentage = maxPoints > 0 ? Math.round((earnedPoints / maxPoints) * 100) : 0;
     } else {
-      progressPercentage = Math.min(95, 70 + (relatedMaterials.length * 5) + (relatedVideos.length * 5));
+      progressPercentage = 0;
     }
-    progressPercentage = Math.min(100, Math.max(25, progressPercentage));
 
     return {
       id: firstSession.id,
@@ -220,11 +307,12 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
       courseFilterDay === 'TODAY' ? course.isToday :
       course.days.includes(courseFilterDay);
 
+    const qCourse = (courseSearch || '').toLowerCase();
     const matchSearch = 
-      course.subjectName.toLowerCase().includes(courseSearch.toLowerCase()) ||
-      course.teacherName.toLowerCase().includes(courseSearch.toLowerCase()) ||
-      course.roomSummary.toLowerCase().includes(courseSearch.toLowerCase()) ||
-      course.timeSummary.toLowerCase().includes(courseSearch.toLowerCase());
+      (course.subjectName || '').toLowerCase().includes(qCourse) ||
+      (course.teacherName || '').toLowerCase().includes(qCourse) ||
+      (course.roomSummary || '').toLowerCase().includes(qCourse) ||
+      (course.timeSummary || '').toLowerCase().includes(qCourse);
 
     return matchDay && matchSearch;
   });
@@ -251,18 +339,44 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
     .filter(m => m.completed)
     .reduce((acc, curr) => acc + curr.points, 250);
 
-  // Filtered materials
-  const filteredMaterials = materials.filter(m => 
-    m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.teacherName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const safeSearchQuery = (searchQuery || '').toLowerCase();
+
+  // Filtered materials with progress filtering
+  const filteredMaterials = materials.filter(m => {
+    if (!m) return false;
+    const isStudied = studiedMaterialIds.includes(m.id) || (studentProgressMap[`material_${m.id}`]?.isCompleted === true);
+    if (materialProgressFilter === 'UNSTUDIED' && isStudied) return false;
+    if (materialProgressFilter === 'COMPLETED' && !isStudied) return false;
+    return (
+      (m.title || '').toLowerCase().includes(safeSearchQuery) ||
+      (m.subject || '').toLowerCase().includes(safeSearchQuery) ||
+      (m.teacherName || '').toLowerCase().includes(safeSearchQuery)
+    );
+  });
+
+  // Filtered books with progress filtering
+  const filteredBooks = books.filter(b => {
+    if (!b) return false;
+    const prog = studentProgressMap[`book_${b.id}`];
+    const isCompleted = prog?.isCompleted === true || (prog?.currentPage && b.totalPages && prog.currentPage >= b.totalPages);
+    const isReading = (prog?.percent || 0) > 0 && !isCompleted;
+    if (bookProgressFilter === 'READING' && !isReading) return false;
+    if (bookProgressFilter === 'COMPLETED' && !isCompleted) return false;
+    return (
+      (b.title || '').toLowerCase().includes(safeSearchQuery) ||
+      (b.subject || '').toLowerCase().includes(safeSearchQuery) ||
+      (b.author || '').toLowerCase().includes(safeSearchQuery)
+    );
+  });
 
   // Filtered quizzes
-  const filteredQuizzes = quizzesToUse.filter(q => 
-    q.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    q.subject.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredQuizzes = quizzesToUse.filter(q => {
+    if (!q) return false;
+    return (
+      (q.title || '').toLowerCase().includes(safeSearchQuery) ||
+      (q.subject || '').toLowerCase().includes(safeSearchQuery)
+    );
+  });
 
   return (
     <div 
@@ -552,7 +666,7 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
 
         {/* Main Content Body */}
         <main className="flex-1 p-4 sm:p-8 pb-24 sm:pb-8 space-y-6 max-w-7xl w-full mx-auto">
-          {/* TAB 0: DASHBOARD OVERVIEW (Bento Grid) */}
+          {/* TAB 0: DASHBOARD OVERVIEW (Bento Grid & Learning Progress) */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
               {/* Header Greeting */}
@@ -564,6 +678,25 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
                   Siap untuk petualangan belajar hari ini?
                 </p>
               </div>
+
+              {/* Interactive Student Learning Progress Tracker Widget */}
+              <StudentLearningProgressWidget
+                currentUser={currentUser}
+                materials={materials}
+                quizzes={quizzesToUse}
+                books={books}
+                videos={videos}
+                studentProgressMap={studentProgressMap}
+                onOpenMaterial={(mat) => setSelectedMaterialForReader(mat)}
+                onOpenBook={(bk, targetPage) => {
+                  setSelectedBook(bk);
+                  setSelectedBookTargetPage(targetPage);
+                }}
+                onOpenQuiz={(qz) => setSelectedQuiz(qz)}
+                onOpenVideo={(vid) => setSelectedVideo(vid)}
+                onOpenDetailModal={() => setShowProgressDetailModal(true)}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
 
               {/* Real-Time Visual Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -809,14 +942,72 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
                     <h3 className="font-extrabold text-slate-100 text-lg">Daftar Materi Pembelajaran</h3>
                     <p className="text-xs text-slate-400">Modul yang disiapkan bapak/ibu guru untuk dipelajari</p>
                   </div>
-                  <span className="px-3.5 py-1.5 bg-emerald-500/15 text-emerald-300 rounded-full text-xs font-mono font-bold border border-emerald-500/30">
-                    {materials.length} Berkas Tersedia
-                  </span>
+                  
+                  {/* Filter Pills for Material Progress */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => setMaterialProgressFilter('ALL')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        materialProgressFilter === 'ALL'
+                          ? 'bg-emerald-500 text-white shadow-sm'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Semua ({materials.length})
+                    </button>
+                    <button
+                      onClick={() => setMaterialProgressFilter('UNSTUDIED')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        materialProgressFilter === 'UNSTUDIED'
+                          ? 'bg-amber-500 text-white shadow-sm'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Belum Selesai ({Math.max(0, materials.length - studiedMaterialIds.length)})
+                    </button>
+                    <button
+                      onClick={() => setMaterialProgressFilter('COMPLETED')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        materialProgressFilter === 'COMPLETED'
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Selesai ({studiedMaterialIds.length})
+                    </button>
+                  </div>
+                </div>
+
+                {/* Material Progress Summary Bar */}
+                <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
+                      <BookOpen className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">Kemajuan Membaca Modul Siswa</span>
+                      <span className="text-[11px] text-slate-400">
+                        {studiedMaterialIds.length} dari {materials.length} modul selesai dipelajari
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <div className="w-full sm:w-48 h-2.5 bg-slate-700 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
+                        style={{ width: `${materials.length > 0 ? Math.round((studiedMaterialIds.length / materials.length) * 100) : 0}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono font-bold text-emerald-400 shrink-0">
+                      {materials.length > 0 ? Math.round((studiedMaterialIds.length / materials.length) * 100) : 0}%
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   {filteredMaterials.map((mat) => {
-                    const isStudied = studiedMaterialIds.includes(mat.id);
+                    const isStudied = studiedMaterialIds.includes(mat.id) || (studentProgressMap[`material_${mat.id}`]?.isCompleted === true);
                     return (
                       <div 
                         key={mat.id} 
@@ -856,10 +1047,20 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
                           </div>
                         </div>
 
-                        <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-800/80">
-                          <span className="text-[11px] text-slate-400 font-semibold truncate max-w-[110px]">
-                            {mat.subject}
-                          </span>
+                        <div className="pt-3 flex items-center justify-between gap-2 border-t border-slate-800/80">
+                          <button
+                            onClick={() => handleToggleStudiedMaterial(mat.id, !isStudied)}
+                            className={`px-2.5 py-1.5 rounded-xl text-[11px] font-semibold flex items-center gap-1 border transition-all cursor-pointer ${
+                              isStudied
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                                : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white hover:bg-slate-700'
+                            }`}
+                            title={isStudied ? 'Telah selesai dipelajari' : 'Tandai sudah dipelajari'}
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>{isStudied ? 'Selesai' : 'Tandai'}</span>
+                          </button>
+
                           <button
                             onClick={() => setSelectedMaterialForReader(mat)}
                             className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all hover:scale-102"
@@ -981,37 +1182,131 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
                     <h3 className="font-extrabold text-slate-100 text-lg">Perpustakaan Digital Siswa (E-Book)</h3>
                     <p className="text-xs text-slate-400">Baca buku paket kurikulum merdeka langsung di dalam portal</p>
                   </div>
-                  <span className="px-3.5 py-1.5 bg-sky-500/15 text-sky-300 rounded-full text-xs font-mono font-bold border border-sky-500/30">
-                    {books.length} E-Book
-                  </span>
+                  
+                  {/* Filter Pills for Book Progress */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => setBookProgressFilter('ALL')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        bookProgressFilter === 'ALL'
+                          ? 'bg-sky-500 text-white shadow-sm'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Semua ({books.length})
+                    </button>
+                    <button
+                      onClick={() => setBookProgressFilter('READING')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        bookProgressFilter === 'READING'
+                          ? 'bg-amber-500 text-white shadow-sm'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Sedang Dibaca ({books.filter(b => {
+                        const p = studentProgressMap[`book_${b.id}`];
+                        return (p?.percent || 0) > 0 && !p?.isCompleted;
+                      }).length})
+                    </button>
+                    <button
+                      onClick={() => setBookProgressFilter('COMPLETED')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        bookProgressFilter === 'COMPLETED'
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Selesai ({books.filter(b => studentProgressMap[`book_${b.id}`]?.isCompleted).length})
+                    </button>
+                  </div>
+                </div>
+
+                {/* Book Reading Overall Stats */}
+                <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-sky-500/20 text-sky-400">
+                      <Book className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">Aktivitas Membaca Buku Digital</span>
+                      <span className="text-[11px] text-slate-400">
+                        {books.filter(b => studentProgressMap[`book_${b.id}`]?.isCompleted).length} dari {books.length} buku selesai dibaca
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <div className="w-full sm:w-48 h-2.5 bg-slate-700 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-sky-500 to-indigo-500 rounded-full transition-all duration-500"
+                        style={{ 
+                          width: `${books.length > 0 ? Math.round((books.filter(b => studentProgressMap[`book_${b.id}`]?.isCompleted).length / books.length) * 100) : 0}%` 
+                        }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono font-bold text-sky-400 shrink-0">
+                      {books.length > 0 ? Math.round((books.filter(b => studentProgressMap[`book_${b.id}`]?.isCompleted).length / books.length) * 100) : 0}%
+                    </span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                  {books.map((bk) => (
-                    <div key={bk.id} className="bg-slate-900/90 border-2 border-sky-500/35 hover:border-sky-400/80 rounded-3xl p-4 flex gap-4 shadow-lg hover:shadow-sky-500/10 transition-all group">
-                      <img src={bk.coverImage} alt={bk.title} className="w-20 h-28 object-cover rounded-2xl shadow-sm shrink-0 border border-slate-700" />
-                      <div className="space-y-2 flex-1 min-w-0 flex flex-col justify-between">
-                        <div>
-                          <span className="text-[10px] font-bold text-sky-300 uppercase bg-sky-500/15 px-2 py-0.5 rounded-full border border-sky-500/30">{bk.subject}</span>
-                          <h4 className="font-bold text-slate-100 text-xs line-clamp-2 group-hover:text-sky-300 transition-colors mt-1">{bk.title}</h4>
-                          <p className="text-[11px] text-slate-400">{bk.author}</p>
-                          {bk.targetPage && (
-                            <p className="text-[10px] text-emerald-400 font-bold mt-1">
-                              🎯 Target Halaman: {bk.targetPage}
-                            </p>
-                          )}
-                        </div>
+                  {filteredBooks.map((bk) => {
+                    const prog = studentProgressMap[`book_${bk.id}`];
+                    const percent = prog?.percent || 0;
+                    const curPage = prog?.currentPage || 1;
+                    const isDone = prog?.isCompleted === true;
 
-                        <button
-                          onClick={() => setSelectedBook(bk)}
-                          className="w-full py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm cursor-pointer transition-all"
-                        >
-                          <BookOpen className="w-3.5 h-3.5" />
-                          <span>Baca E-Book</span>
-                        </button>
+                    return (
+                      <div key={bk.id} className="bg-slate-900/90 border-2 border-sky-500/35 hover:border-sky-400/80 rounded-3xl p-4 flex gap-4 shadow-lg hover:shadow-sky-500/10 transition-all group">
+                        <img src={bk.coverImage} alt={bk.title} className="w-20 h-28 object-cover rounded-2xl shadow-sm shrink-0 border border-slate-700" />
+                        <div className="space-y-2 flex-1 min-w-0 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between gap-1 flex-wrap">
+                              <span className="text-[10px] font-bold text-sky-300 uppercase bg-sky-500/15 px-2 py-0.5 rounded-full border border-sky-500/30">
+                                {bk.subject}
+                              </span>
+                              {isDone ? (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-sans text-[10px] font-bold border border-emerald-500/30 flex items-center gap-0.5">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Selesai
+                                </span>
+                              ) : percent > 0 ? (
+                                <span className="text-[10px] font-mono font-bold text-amber-400">
+                                  Hal {curPage} ({percent}%)
+                                </span>
+                              ) : null}
+                            </div>
+
+                            <h4 className="font-bold text-slate-100 text-xs line-clamp-2 group-hover:text-sky-300 transition-colors mt-1">{bk.title}</h4>
+                            <p className="text-[11px] text-slate-400">{bk.author}</p>
+                            
+                            {/* Progress bar on book */}
+                            <div className="mt-2 space-y-1">
+                              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full rounded-full transition-all ${isDone ? 'bg-emerald-500' : 'bg-sky-500'}`}
+                                  style={{ width: `${percent}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              setSelectedBook(bk);
+                              setSelectedBookTargetPage(curPage > 1 ? curPage : (bk.targetPage || 1));
+                            }}
+                            className="w-full py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm cursor-pointer transition-all"
+                          >
+                            <BookOpen className="w-3.5 h-3.5" />
+                            <span>
+                              {isDone ? 'Baca Ulang' : percent > 0 ? `Lanjut Hal ${curPage}` : 'Baca E-Book'}
+                            </span>
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1566,8 +1861,8 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
 
       {/* RAPOR SISWA MODAL */}
       {showRaporModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar smooth-scroll my-8">
             {/* Header Rapor */}
             <div className="flex items-start justify-between pb-4 border-b border-blue-100 dark:border-slate-800">
               <div className="flex items-center gap-3">
@@ -1697,14 +1992,34 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
         material={selectedMaterialForReader}
         onClose={() => setSelectedMaterialForReader(null)}
         onToggleStudied={handleToggleStudiedMaterial}
-        isStudied={selectedMaterialForReader ? studiedMaterialIds.includes(selectedMaterialForReader.id) : false}
+        isStudied={selectedMaterialForReader ? (studiedMaterialIds.includes(selectedMaterialForReader.id) || studentProgressMap[`material_${selectedMaterialForReader.id}`]?.isCompleted === true) : false}
       />
 
       {/* MODAL E-BOOK READER BUKU DIGITAL PAKET */}
       <BookReaderModal
         isOpen={Boolean(selectedBook)}
         book={selectedBook}
-        onClose={() => setSelectedBook(null)}
+        initialPage={selectedBookTargetPage}
+        isCompleted={selectedBook ? (studentProgressMap[`book_${selectedBook.id}`]?.isCompleted === true) : false}
+        onClose={() => {
+          setSelectedBook(null);
+          setSelectedBookTargetPage(undefined);
+        }}
+        onProgressUpdate={(page, total, completed) => {
+          if (selectedBook) {
+            const pct = total > 0 ? Math.round((page / total) * 100) : 0;
+            handleRecordProgress(
+              selectedBook.id,
+              'book',
+              selectedBook.title,
+              selectedBook.subject,
+              completed ? 100 : pct,
+              completed,
+              page,
+              total
+            );
+          }
+        }}
         allowDownload={false}
       />
 
@@ -1713,6 +2028,35 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
         isOpen={Boolean(selectedVideo)}
         video={selectedVideo}
         onClose={() => setSelectedVideo(null)}
+      />
+
+      {/* MODAL DETAIL LAPORAN PROGRES KEMAJUAN BELAJAR SISWA */}
+      <LearningProgressDetailModal
+        isOpen={showProgressDetailModal}
+        onClose={() => setShowProgressDetailModal(false)}
+        currentUser={currentUser}
+        materials={materials}
+        quizzes={quizzesToUse}
+        books={books}
+        videos={videos}
+        studentProgressMap={studentProgressMap}
+        onOpenMaterial={(mat) => {
+          setShowProgressDetailModal(false);
+          setSelectedMaterialForReader(mat);
+        }}
+        onOpenBook={(bk, page) => {
+          setShowProgressDetailModal(false);
+          setSelectedBook(bk);
+          setSelectedBookTargetPage(page);
+        }}
+        onOpenQuiz={(qz) => {
+          setShowProgressDetailModal(false);
+          setSelectedQuiz(qz);
+        }}
+        onOpenVideo={(vid) => {
+          setShowProgressDetailModal(false);
+          setSelectedVideo(vid);
+        }}
       />
 
       {/* USER PROFILE MODAL */}

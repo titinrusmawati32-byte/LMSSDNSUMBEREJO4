@@ -162,5 +162,39 @@ export interface SchoolSettings {
   updatedAt?: string;
 }
 
+export interface ContentLearningProgress {
+  contentId: string;
+  contentType: 'material' | 'book' | 'video' | 'quiz';
+  title: string;
+  subject: string;
+  isCompleted: boolean;
+  percent: number; // 0 to 100
+  currentPage?: number;
+  totalPages?: number;
+  score?: number;
+  timeSpentMinutes?: number;
+  lastAccessedAt: string;
+}
+
+export interface StudentOverallProgress {
+  studentId: string;
+  studentName?: string;
+  materialsCompletedCount: number;
+  totalMaterialsCount: number;
+  materialsPercent: number;
+  booksCompletedCount: number;
+  totalBooksCount: number;
+  booksPercent: number;
+  quizzesCompletedCount: number;
+  totalQuizzesCount: number;
+  quizzesPercent: number;
+  videosWatchedCount: number;
+  totalVideosCount: number;
+  videosPercent: number;
+  overallPercent: number;
+  progressItems: Record<string, ContentLearningProgress>;
+  lastUpdated: string;
+}
+
 
 

@@ -188,6 +188,19 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["schoolName", "schoolTagline"]
+    },
+    "student_progress": {
+      "title": "StudentLearningProgress",
+      "description": "Comprehensive student learning and reading progress tracking for materials, books, quizzes, and videos",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "progressItems": { "type": "object" },
+        "overallPercent": { "type": "number" },
+        "lastUpdated": { "type": "string" }
+      },
+      "required": ["studentId", "progressItems", "lastUpdated"]
     }
   }
 }
