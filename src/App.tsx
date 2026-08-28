@@ -189,10 +189,7 @@ export default function App() {
 
   const handleCompleteQuiz = (quizId: string, score: number) => {
     setQuizzes(prev => {
-      const updated = prev.map(q => q.id === quizId ? { ...q, completedScore: score } : q);
-      const target = updated.find(q => q.id === quizId);
-      if (target) addQuizToDb(target);
-      return updated;
+      return prev.map(q => q.id === quizId ? { ...q, completedScore: score } : q);
     });
   };
 

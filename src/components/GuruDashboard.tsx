@@ -496,34 +496,44 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
   const [vidSourceType, setVidSourceType] = useState<'youtube' | 'gdrive'>('youtube');
   const [vidDesc, setVidDesc] = useState('');
 
-  // Attendance checklist state
-  const [attendanceList, setAttendanceList] = useState<AttendanceRecord[]>([
-    { id: '1', studentName: 'Muhammad Rizky Pratama', nisn: '0068492011', status: 'hadir', time: '07:25 WIB' },
-    { id: '2', studentName: 'Anisa Nur Rahma', nisn: '0068492012', status: 'hadir', time: '07:28 WIB' },
-    { id: '3', studentName: 'Bagus Setiawan', nisn: '0068492013', status: 'izin', time: '-' },
-    { id: '4', studentName: 'Citra Kirana', nisn: '0068492014', status: 'hadir', time: '07:30 WIB' },
-    { id: '5', studentName: 'Dimas Anggara', nisn: '0068492015', status: 'sakit', time: '-' }
-  ]);
+  // Attendance checklist state - dynamically load and sync with Firestore & studentsList
+  const [dbAttendanceRecords, setDbAttendanceRecords] = useState<AttendanceRecord[]>([]);
 
   useEffect(() => {
     const unsub = subscribeAttendance((items) => {
-      if (items && items.length > 0) {
-        setAttendanceList(items);
-      }
+      setDbAttendanceRecords(items || []);
     });
     return () => unsub();
   }, []);
 
+  const attendanceList = React.useMemo(() => {
+    const currentStudents = studentsList.length > 0 ? studentsList : MOCK_USERS.filter(u => u.role === 'siswa');
+    return currentStudents.map((siswa) => {
+      const record = dbAttendanceRecords.find(r => r.nisn === siswa.identifierNumber || r.id === siswa.id);
+      return {
+        id: siswa.id,
+        studentName: siswa.name,
+        nisn: siswa.identifierNumber || '',
+        status: record ? record.status : 'hadir',
+        time: record ? record.time : '07:30 WIB'
+      } as AttendanceRecord;
+    });
+  }, [studentsList, dbAttendanceRecords]);
+
   const updateAttendance = (id: string, status: 'hadir' | 'izin' | 'sakit' | 'alpa') => {
     const timeVal = status === 'hadir' ? '07:30 WIB' : '-';
-    setAttendanceList(prev => {
-      const updated = prev.map(item => item.id === id ? { ...item, status, time: timeVal } : item);
-      const target = updated.find(item => item.id === id);
-      if (target) {
-        updateAttendanceInDb(target);
-      }
-      return updated;
-    });
+    const currentStudents = studentsList.length > 0 ? studentsList : MOCK_USERS.filter(u => u.role === 'siswa');
+    const siswa = currentStudents.find(s => s.id === id);
+    if (!siswa) return;
+
+    const record: AttendanceRecord = {
+      id: siswa.id,
+      studentName: siswa.name,
+      nisn: siswa.identifierNumber || '',
+      status,
+      time: timeVal
+    };
+    updateAttendanceInDb(record);
   };
 
   // PDF File Selection Handlers
@@ -623,6 +633,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
     setMatDesc('');
     setMatPdfName('');
     setMatPdfFile(null);
+    triggerToast('Bahan ajar berhasil diunggah dan disimpan!');
   };
 
   const handleAddQuestionToQuiz = () => {
@@ -733,6 +744,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
     setBookPdfName('');
     setBookPdfFile(null);
     setTargetPage('');
+    triggerToast('Buku digital berhasil diunggah dan disimpan!');
   };
 
   const handleAddVideoSubmit = (e: React.FormEvent) => {
@@ -1103,7 +1115,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
         </header>
 
         {/* Main Body Content */}
-        <main className="flex-1 p-4 sm:p-8 space-y-6 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-8 pb-24 sm:pb-8 space-y-6 max-w-7xl w-full mx-auto">
           {/* TAB 0: DASHBOARD OVERVIEW (Material You Bento Grid) */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
@@ -2988,7 +3000,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
 
       {/* Notification Toast */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white border-2 border-emerald-500/80 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3">
+        <div className="fixed bottom-24 md:bottom-6 right-4 md:right-6 z-50 bg-slate-900 text-white border-2 border-emerald-500/80 px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3">
           <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
           <span className="text-xs font-bold text-emerald-100">{toastMessage}</span>
         </div>
@@ -3002,6 +3014,57 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
         onUpdateUser={onUpdateCurrentUser}
         onLogout={onLogout}
       />
+
+      {/* STICKY BOTTOM NAVIGATION BAR FOR MOBILE (HP) */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 shadow-xl px-2 py-1.5 flex items-center justify-around h-16 pb-safe">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex flex-col items-center justify-center gap-1 w-14 h-12 rounded-xl transition-all cursor-pointer ${
+            activeTab === 'dashboard' ? 'text-sky-400 bg-sky-500/10' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Sparkles className="w-5 h-5" />
+          <span className="text-[10px] font-bold">Dasbor</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('materials')}
+          className={`flex flex-col items-center justify-center gap-1 w-14 h-12 rounded-xl transition-all cursor-pointer ${
+            activeTab === 'materials' ? 'text-sky-400 bg-sky-500/10' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <BookOpen className="w-5 h-5" />
+          <span className="text-[10px] font-bold">Materi</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('quizzes')}
+          className={`flex flex-col items-center justify-center gap-1 w-14 h-12 rounded-xl transition-all cursor-pointer ${
+            activeTab === 'quizzes' ? 'text-sky-400 bg-sky-500/10' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <GraduationCap className="w-5 h-5" />
+          <span className="text-[10px] font-bold">Kuis</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('attendance')}
+          className={`flex flex-col items-center justify-center gap-1 w-14 h-12 rounded-xl transition-all cursor-pointer ${
+            activeTab === 'attendance' ? 'text-sky-400 bg-sky-500/10' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Users className="w-5 h-5" />
+          <span className="text-[10px] font-bold">Presensi</span>
+        </button>
+
+        <button
+          onClick={() => setIsMobileMenuOpen(true)}
+          className="flex flex-col items-center justify-center gap-1 w-14 h-12 rounded-xl text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
+        >
+          <Menu className="w-5 h-5" />
+          <span className="text-[10px] font-bold">Menu</span>
+        </button>
+      </div>
     </div>
   );
 };

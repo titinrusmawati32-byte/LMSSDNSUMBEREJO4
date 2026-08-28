@@ -7,9 +7,9 @@ import {
   Image as ImageIcon, Search, ChevronRight, UserCheck, Flame, Trophy, Printer,
   MapPin, User
 } from 'lucide-react';
-import { UserProfile, LearningMaterial, QuizExam, DigitalBook, LearningVideo, SystemAnnouncement, ClassSchedule, ScheduleDay, SchoolSettings } from '../types';
+import { UserProfile, LearningMaterial, QuizExam, DigitalBook, LearningVideo, SystemAnnouncement, ClassSchedule, ScheduleDay, SchoolSettings, StudentQuizSubmission } from '../types';
 import { MOCK_COURSES, MOCK_ASSIGNMENTS } from '../data/mockData';
-import { subscribeUsers } from '../lib/lmsDb';
+import { subscribeUsers, subscribeSubmissions } from '../lib/lmsDb';
 import { QuizExamModal } from './QuizExamModal';
 import { BookReaderModal } from './BookReaderModal';
 import { VideoPlayerModal } from './VideoPlayerModal';
@@ -56,6 +56,7 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
   const [courseSearch, setCourseSearch] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [studentsList, setStudentsList] = useState<UserProfile[]>([]);
+  const [submissionsList, setSubmissionsList] = useState<StudentQuizSubmission[]>([]);
 
   // Subscribe to real-time users list to get current count of registered students
   React.useEffect(() => {
@@ -65,6 +66,25 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
     });
     return () => unsub();
   }, []);
+
+  // Subscribe to real-time quiz submissions to resolve student's completed scores
+  React.useEffect(() => {
+    const unsub = subscribeSubmissions((subs) => {
+      setSubmissionsList(subs || []);
+    });
+    return () => unsub();
+  }, []);
+
+  // Map quizzes to include completed scores dynamically resolved from personal submissions
+  const quizzesToUse = React.useMemo(() => {
+    return quizzes.map(q => {
+      const userSub = submissionsList.find(s => s.studentId === currentUser.id && s.quizId === q.id);
+      return {
+        ...q,
+        completedScore: userSub ? userSub.score : undefined
+      };
+    });
+  }, [quizzes, submissionsList, currentUser.id]);
 
   // Determine current day in Indonesian for SD Negeri Sumberejo 04
   const dayIndex = new Date().getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
@@ -79,8 +99,8 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
     if (materials && materials.length > 0) {
       list.push({ id: 'm-mat', text: `Pelajari Modul Bahan Ajar (${materials.length} Modul Available)`, points: 50, completed: false });
     }
-    if (quizzes && quizzes.length > 0) {
-      list.push({ id: 'm-quiz', text: `Kerjakan Kuis & Ujian (${quizzes.length} Paket Soal)`, points: 75, completed: false });
+    if (quizzesToUse && quizzesToUse.length > 0) {
+      list.push({ id: 'm-quiz', text: `Kerjakan Kuis & Ujian (${quizzesToUse.length} Paket Soal)`, points: 75, completed: false });
     }
     if (books && books.length > 0) {
       list.push({ id: 'm-book', text: `Baca Buku Digital E-Book (${books.length} Buku Available)`, points: 40, completed: false });
@@ -90,7 +110,7 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
     }
     list.push({ id: 'm-att', text: 'Konfirmasi Presensi Kehadiran Harian', points: 30, completed: true });
     setDailyMissions(list);
-  }, [materials.length, quizzes.length, books.length, videos.length]);
+  }, [materials.length, quizzesToUse.length, books.length, videos.length]);
 
   // Modal active objects
   const [selectedQuiz, setSelectedQuiz] = useState<QuizExam | null>(null);
@@ -154,7 +174,7 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
     };
 
     const relatedMaterials = materials.filter(m => matchesItem(m.subject) || matchesItem(m.title));
-    const relatedQuizzes = quizzes.filter(q => matchesItem(q.subject) || matchesItem(q.title));
+    const relatedQuizzes = quizzesToUse.filter(q => matchesItem(q.subject) || matchesItem(q.title));
     const relatedVideos = videos.filter(v => matchesItem(v.subject) || matchesItem(v.title));
     const relatedBooks = books.filter(b => matchesItem(b.subject) || matchesItem(b.title));
 
@@ -239,7 +259,7 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
   );
 
   // Filtered quizzes
-  const filteredQuizzes = quizzes.filter(q => 
+  const filteredQuizzes = quizzesToUse.filter(q => 
     q.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     q.subject.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -531,7 +551,7 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
         </header>
 
         {/* Main Content Body */}
-        <main className="flex-1 p-4 sm:p-8 space-y-6 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-4 sm:p-8 pb-24 sm:pb-8 space-y-6 max-w-7xl w-full mx-auto">
           {/* TAB 0: DASHBOARD OVERVIEW (Bento Grid) */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
@@ -1656,7 +1676,7 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
 
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-sky-600 text-white px-5 py-3 rounded-full text-xs font-bold shadow-2xl flex items-center gap-2 border border-blue-300/40 animate-bounce">
+        <div className="fixed bottom-24 md:bottom-6 right-4 md:right-6 z-50 bg-sky-600 text-white px-5 py-3 rounded-full text-xs font-bold shadow-2xl flex items-center gap-2 border border-blue-300/40 animate-bounce">
           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           <span>{toastMessage}</span>
         </div>
@@ -1703,6 +1723,57 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
         onUpdateUser={onUpdateCurrentUser}
         onLogout={onLogout}
       />
+
+      {/* STICKY BOTTOM NAVIGATION BAR FOR MOBILE (HP) */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 shadow-xl px-2 py-1.5 flex items-center justify-around h-16 pb-safe">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex flex-col items-center justify-center gap-1 w-14 h-12 rounded-xl transition-all cursor-pointer ${
+            activeTab === 'dashboard' ? 'text-sky-400 bg-sky-500/10' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Sparkles className="w-5 h-5" />
+          <span className="text-[10px] font-bold">Dasbor</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('materials')}
+          className={`flex flex-col items-center justify-center gap-1 w-14 h-12 rounded-xl transition-all cursor-pointer ${
+            activeTab === 'materials' ? 'text-sky-400 bg-sky-500/10' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <BookOpen className="w-5 h-5" />
+          <span className="text-[10px] font-bold">Materi</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('quizzes')}
+          className={`flex flex-col items-center justify-center gap-1 w-14 h-12 rounded-xl transition-all cursor-pointer ${
+            activeTab === 'quizzes' ? 'text-sky-400 bg-sky-500/10' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <GraduationCap className="w-5 h-5" />
+          <span className="text-[10px] font-bold">Kuis</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('books')}
+          className={`flex flex-col items-center justify-center gap-1 w-14 h-12 rounded-xl transition-all cursor-pointer ${
+            activeTab === 'books' ? 'text-sky-400 bg-sky-500/10' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Book className="w-5 h-5" />
+          <span className="text-[10px] font-bold">E-Book</span>
+        </button>
+
+        <button
+          onClick={() => setIsMobileMenuOpen(true)}
+          className="flex flex-col items-center justify-center gap-1 w-14 h-12 rounded-xl text-slate-400 hover:text-slate-200 transition-all cursor-pointer"
+        >
+          <Menu className="w-5 h-5" />
+          <span className="text-[10px] font-bold">Menu</span>
+        </button>
+      </div>
     </div>
   );
 };

@@ -178,6 +178,18 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
         if (!isCancelled) {
           setPdfDoc(loadedDoc);
           setNumPages(loadedDoc.numPages);
+          
+          try {
+            const page1 = await loadedDoc.getPage(1);
+            const viewport1 = page1.getViewport({ scale: 1.0, rotation: 0 });
+            const isMob = window.innerWidth < 768;
+            const containerWidth = window.innerWidth - (isMob ? 32 : 120);
+            const calculatedScale = Math.min(Math.max(containerWidth / viewport1.width, isMob ? 0.45 : 1.0), isMob ? 1.0 : 2.0);
+            setScale(calculatedScale);
+          } catch (e) {
+            setScale(window.innerWidth < 768 ? 0.6 : 1.2);
+          }
+          
           setIsLoading(false);
         }
       } catch (err: any) {
