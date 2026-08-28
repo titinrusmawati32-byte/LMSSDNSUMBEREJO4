@@ -59,6 +59,7 @@ export interface LearningMaterial {
   subject: string;
   fileType: 'PDF' | 'PPT' | 'DOCX' | 'ZIP';
   fileSize: string;
+  fileChunks?: number;
   uploadDate: string;
   teacherName: string;
   description: string;
@@ -100,6 +101,7 @@ export interface DigitalBook {
   coverImage: string;
   description: string;
   fileSize: string;
+  fileChunks?: number;
   rating: number;
   readCount: number;
   fileName?: string;

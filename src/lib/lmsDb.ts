@@ -1,4 +1,5 @@
-import {
+import { 
+  getDoc,
   collection,
   doc,
   setDoc,
@@ -6,9 +7,9 @@ import {
   onSnapshot,
   getDocs,
   query
-} from 'firebase/firestore';
-import { db } from './firebase';
-import {
+} from "firebase/firestore";
+import {  db } from './firebase';
+import { 
   LearningMaterial,
   QuizExam,
   DigitalBook,
@@ -20,7 +21,7 @@ import {
   StudentQuizSubmission,
   SchoolSettings
 } from '../types';
-import {
+import { 
   MOCK_MATERIALS,
   MOCK_QUIZZES,
   MOCK_BOOKS,
@@ -34,6 +35,17 @@ import {
 const MATERIALS_COL = 'materials';
 const QUIZZES_COL = 'quizzes';
 const BOOKS_COL = 'books';
+function cleanData(obj: any): any {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(cleanData);
+  const result: any = {};
+  for (const key of Object.keys(obj)) {
+    if (obj[key] !== undefined) {
+      result[key] = cleanData(obj[key]);
+    }
+  }
+  return result;
+}
 const VIDEOS_COL = 'videos';
 const USERS_COL = 'users';
 const ANNOUNCEMENTS_COL = 'announcements';
@@ -91,6 +103,7 @@ export async function purgeDefaultUsersFromDb() {
 
 // Helper to seed database if empty
 export async function seedInitialDataIfEmpty() {
+  forcePurgeMockContent();
   const deletedSet = getDeletedIds();
   // Always clean up old default test users from Firestore server
   await purgeDefaultUsersFromDb();
@@ -100,7 +113,7 @@ export async function seedInitialDataIfEmpty() {
     if (usersSnap.empty) {
       for (const item of MOCK_USERS) {
         if (!deletedSet.has(item.id) && !OLD_DEFAULT_USER_IDS.includes(item.id)) {
-          await setDoc(doc(db, USERS_COL, item.id), item);
+          await setDoc(doc(db, USERS_COL, item.id), cleanData(item));
         }
       }
     }
@@ -113,7 +126,7 @@ export async function seedInitialDataIfEmpty() {
     if (matSnap.empty) {
       for (const item of MOCK_MATERIALS) {
         if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, MATERIALS_COL, item.id), item);
+          await setDoc(doc(db, MATERIALS_COL, item.id), cleanData(item));
         }
       }
     }
@@ -126,7 +139,7 @@ export async function seedInitialDataIfEmpty() {
     if (quizSnap.empty) {
       for (const item of MOCK_QUIZZES) {
         if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, QUIZZES_COL, item.id), item);
+          await setDoc(doc(db, QUIZZES_COL, item.id), cleanData(item));
         }
       }
     }
@@ -139,7 +152,7 @@ export async function seedInitialDataIfEmpty() {
     if (bookSnap.empty) {
       for (const item of MOCK_BOOKS) {
         if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, BOOKS_COL, item.id), item);
+          await setDoc(doc(db, BOOKS_COL, item.id), cleanData(item));
         }
       }
     }
@@ -152,7 +165,7 @@ export async function seedInitialDataIfEmpty() {
     if (vidSnap.empty) {
       for (const item of MOCK_VIDEOS) {
         if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, VIDEOS_COL, item.id), item);
+          await setDoc(doc(db, VIDEOS_COL, item.id), cleanData(item));
         }
       }
     }
@@ -165,7 +178,7 @@ export async function seedInitialDataIfEmpty() {
     if (annSnap.empty) {
       for (const item of MOCK_ANNOUNCEMENTS) {
         if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, ANNOUNCEMENTS_COL, item.id), item);
+          await setDoc(doc(db, ANNOUNCEMENTS_COL, item.id), cleanData(item));
         }
       }
     }
@@ -178,7 +191,7 @@ export async function seedInitialDataIfEmpty() {
     if (schedSnap.empty) {
       for (const item of MOCK_SCHEDULES) {
         if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, SCHEDULES_COL, item.id), item);
+          await setDoc(doc(db, SCHEDULES_COL, item.id), cleanData(item));
         }
       }
     }
@@ -217,25 +230,25 @@ export async function resetAllDatabaseData() {
 
   // Re-seed default clean state
   for (const item of MOCK_MATERIALS) {
-    await setDoc(doc(db, MATERIALS_COL, item.id), item);
+    await setDoc(doc(db, MATERIALS_COL, item.id), cleanData(item));
   }
   for (const item of MOCK_QUIZZES) {
-    await setDoc(doc(db, QUIZZES_COL, item.id), item);
+    await setDoc(doc(db, QUIZZES_COL, item.id), cleanData(item));
   }
   for (const item of MOCK_BOOKS) {
-    await setDoc(doc(db, BOOKS_COL, item.id), item);
+    await setDoc(doc(db, BOOKS_COL, item.id), cleanData(item));
   }
   for (const item of MOCK_VIDEOS) {
-    await setDoc(doc(db, VIDEOS_COL, item.id), item);
+    await setDoc(doc(db, VIDEOS_COL, item.id), cleanData(item));
   }
   for (const item of MOCK_USERS) {
-    await setDoc(doc(db, USERS_COL, item.id), item);
+    await setDoc(doc(db, USERS_COL, item.id), cleanData(item));
   }
   for (const item of MOCK_ANNOUNCEMENTS) {
-    await setDoc(doc(db, ANNOUNCEMENTS_COL, item.id), item);
+    await setDoc(doc(db, ANNOUNCEMENTS_COL, item.id), cleanData(item));
   }
   for (const item of MOCK_SCHEDULES) {
-    await setDoc(doc(db, SCHEDULES_COL, item.id), item);
+    await setDoc(doc(db, SCHEDULES_COL, item.id), cleanData(item));
   }
 }
 
@@ -268,7 +281,7 @@ export function subscribeMaterials(callback: (items: LearningMaterial[]) => void
 export async function addMaterialToDb(material: LearningMaterial) {
   unmarkIdAsDeleted(material.id);
   try {
-    await setDoc(doc(db, MATERIALS_COL, material.id), material);
+    await setDoc(doc(db, MATERIALS_COL, material.id), cleanData(material));
   } catch (err) {
     console.warn('addMaterialToDb error:', err);
   }
@@ -312,7 +325,7 @@ export function subscribeQuizzes(callback: (items: QuizExam[]) => void) {
 export async function addQuizToDb(quiz: QuizExam) {
   unmarkIdAsDeleted(quiz.id);
   try {
-    await setDoc(doc(db, QUIZZES_COL, quiz.id), quiz);
+    await setDoc(doc(db, QUIZZES_COL, quiz.id), cleanData(quiz));
   } catch (err) {
     console.warn('addQuizToDb error:', err);
   }
@@ -356,7 +369,7 @@ export function subscribeBooks(callback: (items: DigitalBook[]) => void) {
 export async function addBookToDb(book: DigitalBook) {
   unmarkIdAsDeleted(book.id);
   try {
-    await setDoc(doc(db, BOOKS_COL, book.id), book);
+    await setDoc(doc(db, BOOKS_COL, book.id), cleanData(book));
   } catch (err) {
     console.warn('addBookToDb error:', err);
   }
@@ -400,7 +413,7 @@ export function subscribeVideos(callback: (items: LearningVideo[]) => void) {
 export async function addVideoToDb(video: LearningVideo) {
   unmarkIdAsDeleted(video.id);
   try {
-    await setDoc(doc(db, VIDEOS_COL, video.id), video);
+    await setDoc(doc(db, VIDEOS_COL, video.id), cleanData(video));
   } catch (err) {
     console.warn('addVideoToDb error:', err);
   }
@@ -452,7 +465,7 @@ export function subscribeUsers(callback: (items: UserProfile[]) => void) {
 export async function addUserToDb(user: UserProfile) {
   unmarkIdAsDeleted(user.id);
   try {
-    await setDoc(doc(db, USERS_COL, user.id), user);
+    await setDoc(doc(db, USERS_COL, user.id), cleanData(user));
   } catch (err) {
     console.warn('addUserToDb error:', err);
   }
@@ -461,7 +474,7 @@ export async function addUserToDb(user: UserProfile) {
 export async function updateUserInDb(user: UserProfile) {
   unmarkIdAsDeleted(user.id);
   try {
-    await setDoc(doc(db, USERS_COL, user.id), user, { merge: true });
+    await setDoc(doc(db, USERS_COL, user.id), cleanData(user), { merge: true });
   } catch (err) {
     console.warn('updateUserInDb error:', err);
   }
@@ -505,7 +518,7 @@ export function subscribeAnnouncements(callback: (items: SystemAnnouncement[]) =
 export async function addAnnouncementToDb(announcement: SystemAnnouncement) {
   unmarkIdAsDeleted(announcement.id);
   try {
-    await setDoc(doc(db, ANNOUNCEMENTS_COL, announcement.id), announcement);
+    await setDoc(doc(db, ANNOUNCEMENTS_COL, announcement.id), cleanData(announcement));
   } catch (err) {
     console.warn('addAnnouncementToDb error:', err);
   }
@@ -536,7 +549,7 @@ export function subscribeAttendance(callback: (items: AttendanceRecord[]) => voi
 
 export async function updateAttendanceInDb(attendance: AttendanceRecord) {
   try {
-    await setDoc(doc(db, ATTENDANCE_COL, attendance.id), attendance);
+    await setDoc(doc(db, ATTENDANCE_COL, attendance.id), cleanData(attendance));
   } catch (err) {
     console.warn('updateAttendanceInDb error:', err);
   }
@@ -571,7 +584,7 @@ export function subscribeSchedules(callback: (items: ClassSchedule[]) => void) {
 export async function addScheduleToDb(schedule: ClassSchedule) {
   unmarkIdAsDeleted(schedule.id);
   try {
-    await setDoc(doc(db, SCHEDULES_COL, schedule.id), schedule);
+    await setDoc(doc(db, SCHEDULES_COL, schedule.id), cleanData(schedule));
   } catch (err) {
     console.warn('addScheduleToDb error:', err);
   }
@@ -580,7 +593,7 @@ export async function addScheduleToDb(schedule: ClassSchedule) {
 export async function updateScheduleInDb(schedule: ClassSchedule) {
   unmarkIdAsDeleted(schedule.id);
   try {
-    await setDoc(doc(db, SCHEDULES_COL, schedule.id), schedule, { merge: true });
+    await setDoc(doc(db, SCHEDULES_COL, schedule.id), cleanData(schedule), { merge: true });
   } catch (err) {
     console.warn('updateScheduleInDb error:', err);
   }
@@ -612,7 +625,7 @@ export function subscribeSubmissions(callback: (items: StudentQuizSubmission[]) 
 
 export async function addSubmissionToDb(submission: StudentQuizSubmission) {
   try {
-    await setDoc(doc(db, SUBMISSIONS_COL, submission.id), submission);
+    await setDoc(doc(db, SUBMISSIONS_COL, submission.id), cleanData(submission));
   } catch (err) {
     console.warn('addSubmissionToDb error:', err);
   }
@@ -675,7 +688,7 @@ export async function updateSchoolSettingsInDb(newSettings: Partial<SchoolSettin
   };
   saveLocalSchoolSettings(updated);
   try {
-    await setDoc(doc(db, SETTINGS_COL, 'school_settings'), updated, { merge: true });
+    await setDoc(doc(db, SETTINGS_COL, 'school_settings'), cleanData(updated), { merge: true });
   } catch (err) {
     console.warn('updateSchoolSettingsInDb error:', err);
   }
@@ -684,7 +697,7 @@ export async function updateSchoolSettingsInDb(newSettings: Partial<SchoolSettin
 export async function updateBookInDb(book: DigitalBook) {
   unmarkIdAsDeleted(book.id);
   try {
-    await setDoc(doc(db, BOOKS_COL, book.id), book, { merge: true });
+    await setDoc(doc(db, BOOKS_COL, book.id), cleanData(book), { merge: true });
   } catch (err) {
     console.warn('updateBookInDb error:', err);
   }
@@ -693,7 +706,7 @@ export async function updateBookInDb(book: DigitalBook) {
 export async function updateMaterialInDb(material: LearningMaterial) {
   unmarkIdAsDeleted(material.id);
   try {
-    await setDoc(doc(db, MATERIALS_COL, material.id), material, { merge: true });
+    await setDoc(doc(db, MATERIALS_COL, material.id), cleanData(material), { merge: true });
   } catch (err) {
     console.warn('updateMaterialInDb error:', err);
   }
@@ -702,7 +715,7 @@ export async function updateMaterialInDb(material: LearningMaterial) {
 export async function updateQuizInDb(quiz: QuizExam) {
   unmarkIdAsDeleted(quiz.id);
   try {
-    await setDoc(doc(db, QUIZZES_COL, quiz.id), quiz, { merge: true });
+    await setDoc(doc(db, QUIZZES_COL, quiz.id), cleanData(quiz), { merge: true });
   } catch (err) {
     console.warn('updateQuizInDb error:', err);
   }
@@ -711,7 +724,7 @@ export async function updateQuizInDb(quiz: QuizExam) {
 export async function updateVideoInDb(video: LearningVideo) {
   unmarkIdAsDeleted(video.id);
   try {
-    await setDoc(doc(db, VIDEOS_COL, video.id), video, { merge: true });
+    await setDoc(doc(db, VIDEOS_COL, video.id), cleanData(video), { merge: true });
   } catch (err) {
     console.warn('updateVideoInDb error:', err);
   }
@@ -720,7 +733,7 @@ export async function updateVideoInDb(video: LearningVideo) {
 export async function updateAnnouncementInDb(announcement: SystemAnnouncement) {
   unmarkIdAsDeleted(announcement.id);
   try {
-    await setDoc(doc(db, ANNOUNCEMENTS_COL, announcement.id), announcement, { merge: true });
+    await setDoc(doc(db, ANNOUNCEMENTS_COL, announcement.id), cleanData(announcement), { merge: true });
   } catch (err) {
     console.warn('updateAnnouncementInDb error:', err);
   }
@@ -807,7 +820,7 @@ export async function restoreFullDatabaseBackup(backupPayload: any): Promise<{ s
           const docId = item.id || (key === 'settings' ? 'school_settings' : undefined);
           if (docId) {
             unmarkIdAsDeleted(docId);
-            await setDoc(doc(db, colName, docId), item, { merge: true });
+            await setDoc(doc(db, colName, docId), cleanData(item), { merge: true });
             totalRestored++;
           }
         }
@@ -873,36 +886,36 @@ export async function forceSyncAllToCloud(): Promise<number> {
   try {
     for (const item of MOCK_USERS) {
       if (!OLD_DEFAULT_USER_IDS.includes(item.id)) {
-        await setDoc(doc(db, USERS_COL, item.id), item, { merge: true });
+        await setDoc(doc(db, USERS_COL, item.id), cleanData(item), { merge: true });
         count++;
       }
     }
     for (const item of MOCK_MATERIALS) {
-      await setDoc(doc(db, MATERIALS_COL, item.id), item, { merge: true });
+      await setDoc(doc(db, MATERIALS_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
     for (const item of MOCK_QUIZZES) {
-      await setDoc(doc(db, QUIZZES_COL, item.id), item, { merge: true });
+      await setDoc(doc(db, QUIZZES_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
     for (const item of MOCK_BOOKS) {
-      await setDoc(doc(db, BOOKS_COL, item.id), item, { merge: true });
+      await setDoc(doc(db, BOOKS_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
     for (const item of MOCK_VIDEOS) {
-      await setDoc(doc(db, VIDEOS_COL, item.id), item, { merge: true });
+      await setDoc(doc(db, VIDEOS_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
     for (const item of MOCK_ANNOUNCEMENTS) {
-      await setDoc(doc(db, ANNOUNCEMENTS_COL, item.id), item, { merge: true });
+      await setDoc(doc(db, ANNOUNCEMENTS_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
     for (const item of MOCK_SCHEDULES) {
-      await setDoc(doc(db, SCHEDULES_COL, item.id), item, { merge: true });
+      await setDoc(doc(db, SCHEDULES_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
     const currentSettings = getLocalSchoolSettings();
-    await setDoc(doc(db, SETTINGS_COL, 'school_settings'), currentSettings, { merge: true });
+    await setDoc(doc(db, SETTINGS_COL, 'school_settings'), cleanData(currentSettings), { merge: true });
     count++;
   } catch (err) {
     console.error('Error force syncing to cloud:', err);
@@ -912,3 +925,55 @@ export async function forceSyncAllToCloud(): Promise<number> {
 
 
 
+
+
+
+export async function uploadLargeFileToFirestore(fileId: string, b64Data: string): Promise<number> {
+  const CHUNK_SIZE = 900000;
+  const chunks = Math.ceil(b64Data.length / CHUNK_SIZE);
+  for (let i = 0; i < chunks; i++) {
+    const chunkId = `${fileId}_chunk_${i}`;
+    const chunkData = b64Data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    await setDoc(doc(db, 'file_chunks', chunkId), {
+       fileId,
+       index: i,
+       data: chunkData
+    });
+  }
+  return chunks;
+}
+
+export async function downloadLargeFileFromFirestore(fileId: string, chunks: number): Promise<string> {
+  let fullB64 = '';
+  for (let i = 0; i < chunks; i++) {
+    const chunkId = `${fileId}_chunk_${i}`;
+    const snap = await getDoc(doc(db, 'file_chunks', chunkId));
+    if (snap.exists()) {
+      fullB64 += snap.data().data;
+    }
+  }
+  return fullB64;
+}
+
+export async function forcePurgeMockContent() {
+  const mockIds = {
+    materials: ['mat-1', 'mat-2', 'mat-3'],
+    books: ['bk-1', 'bk-2', 'bk-3'],
+    videos: ['vid-1', 'vid-2', 'vid-3', 'vid-4'],
+    quizzes: ['qz-1', 'qz-2', 'qz-3'],
+    announcements: ['ann-1', 'ann-2', 'ann-3', 'ann-4'],
+    schedules: ['sch-1', 'sch-2', 'sch-3', 'sch-4', 'sch-5', 'sch-6']
+  };
+
+  try {
+    for (const id of mockIds.materials) await deleteDoc(doc(db, MATERIALS_COL, id));
+    for (const id of mockIds.books) await deleteDoc(doc(db, BOOKS_COL, id));
+    for (const id of mockIds.videos) await deleteDoc(doc(db, VIDEOS_COL, id));
+    for (const id of mockIds.quizzes) await deleteDoc(doc(db, QUIZZES_COL, id));
+    for (const id of mockIds.announcements) await deleteDoc(doc(db, ANNOUNCEMENTS_COL, id));
+    for (const id of mockIds.schedules) await deleteDoc(doc(db, SCHEDULES_COL, id));
+    console.log('Mock content purged successfully');
+  } catch (err) {
+    console.warn('Error purging mock content:', err);
+  }
+}

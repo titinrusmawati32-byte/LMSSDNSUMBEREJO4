@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, AttendanceRecord, LearningMaterial, QuizExam, DigitalBook, LearningVideo, QuizQuestion, SystemAnnouncement, ClassSchedule, StudentQuizSubmission, SchoolSettings } from '../types';
 import { MOCK_COURSES, MOCK_ASSIGNMENTS, MOCK_USERS } from '../data/mockData';
-import { subscribeAttendance, updateAttendanceInDb, subscribeUsers, addUserToDb, deleteUserFromDb, updateUserInDb, subscribeSubmissions } from '../lib/lmsDb';
+import { subscribeAttendance, updateAttendanceInDb, subscribeUsers, addUserToDb, deleteUserFromDb, updateUserInDb, subscribeSubmissions, uploadLargeFileToFirestore } from '../lib/lmsDb';
 import { DeleteConfirmModal, DeleteSuccessModal } from './DeleteModal';
 import { WordQuizImportModal } from './WordQuizImportModal';
 import { BookReaderModal } from './BookReaderModal';
@@ -578,6 +578,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
     const newId = 'mat-' + Date.now();
     let fileUrlFromServer: string | undefined = undefined;
     let fileDataStr: string | undefined = undefined;
+    let fileChunksCount: number | undefined = undefined;
 
     if (matPdfFile) {
       try {
@@ -589,6 +590,8 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
         // Only keep in firestore document if it is small enough (<900KB) to prevent document size errors
         if (b64.length < 900000) {
           fileDataStr = b64;
+        } else {
+          try { fileChunksCount = await uploadLargeFileToFirestore(newId, b64); } catch(err) {}
         }
 
         // Upload to Node/Express backend for multi-device synchronization
@@ -625,7 +628,8 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
       downloadCount: 0,
       fileName: matPdfName || (matTitle + '.pdf'),
       fileUrl: fileUrlFromServer,
-      fileData: fileDataStr
+      fileData: fileDataStr,
+      fileChunks: fileChunksCount
     };
     onAddMaterial(newMat);
     setShowMaterialModal(false);
@@ -686,6 +690,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
     const bookId = 'bk-' + Date.now();
     let fileUrlFromServer: string | undefined = undefined;
     let fileDataStr: string | undefined = undefined;
+    let fileChunksCount: number | undefined = undefined;
 
     if (bookPdfFile) {
       try {
@@ -697,9 +702,16 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
         // Only keep in firestore document if it is small enough (<900KB) to prevent document size errors
         if (b64.length < 900000) {
           fileDataStr = b64;
+        } else {
+          // Upload large file in chunks to bypass Firestore 1MB document limit
+          try {
+            fileChunksCount = await uploadLargeFileToFirestore(bookId, b64);
+          } catch (chunkErr) {
+            console.error('Failed to upload file chunks to Firestore', chunkErr);
+          }
         }
 
-        // Upload to server for cross-device access
+        // Upload to server for cross-device access (if available)
         const res = await fetch('/api/upload-pdf', {
           method: 'POST',
           headers: {
@@ -734,6 +746,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
       fileName: bookPdfName || (bookTitle + '.pdf'),
       fileUrl: fileUrlFromServer,
       fileData: fileDataStr,
+      fileChunks: fileChunksCount,
       targetPage: targetPage ? Number(targetPage) : undefined
     };
 

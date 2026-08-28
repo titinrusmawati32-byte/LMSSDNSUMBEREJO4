@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { LearningMaterial } from '../types';
+import { downloadLargeFileFromFirestore } from "../lib/lmsDb";
 import { getPdfBlob, getPdfArrayBuffer } from '../lib/pdfStorage';
 
 // Configure PDF.js worker
@@ -146,6 +147,24 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
           if (blob) {
             blobUrl = URL.createObjectURL(blob);
             setRawBlobUrl(blobUrl);
+          }
+        } else if (material.fileChunks && material.fileChunks > 0) {
+          // 1.5 Download chunks from Firestore
+          try {
+            const fullB64 = await downloadLargeFileFromFirestore(material.id, material.fileChunks);
+            if (fullB64 && fullB64.startsWith('data:')) {
+              const parts = fullB64.split(',');
+              if (parts[1]) {
+                const binaryString = window.atob(parts[1]);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+                }
+                pdfData = bytes.buffer;
+              }
+            }
+          } catch(err) {
+            console.error('Failed to download PDF chunks', err);
           }
         } else if (material.fileData && material.fileData.startsWith('data:application/pdf;base64,')) {
           // 2. Base64 data URL
