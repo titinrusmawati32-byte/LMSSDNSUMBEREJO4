@@ -6,7 +6,9 @@ import {
   deleteDoc,
   onSnapshot,
   getDocs,
-  query
+  query,
+  disableNetwork,
+  setLogLevel
 } from "firebase/firestore";
 import { db } from './firebase';
 import { 
@@ -50,7 +52,40 @@ const SETTINGS_LOCAL_KEY = 'edusmart_lms_school_settings';
 const SEED_FLAG_KEY = 'edusmart_db_seeded_v3';
 
 // Quota and Error Circuit Breaker
+const QUOTA_EXCEEDED_KEY = 'edusmart_quota_exceeded_flag';
+const QUOTA_TIMESTAMP_KEY = 'edusmart_quota_exceeded_timestamp';
+
 let isQuotaExceeded = false;
+if (typeof window !== 'undefined') {
+  try {
+    const flag = localStorage.getItem(QUOTA_EXCEEDED_KEY);
+    const timestamp = localStorage.getItem(QUOTA_TIMESTAMP_KEY);
+    if (flag === 'true' && timestamp) {
+      const elapsed = Date.now() - parseInt(timestamp, 10);
+      // Keep the quota exceeded state if elapsed time is less than 12 hours
+      if (elapsed < 43200000) {
+        isQuotaExceeded = true;
+        try {
+          setLogLevel('silent');
+        } catch {}
+        disableNetwork(db).catch(console.error);
+        console.warn('[EduSmart LMS] Firestore daily write quota limit previously reached. Loaded in offline-first mode.');
+      } else {
+        localStorage.removeItem(QUOTA_EXCEEDED_KEY);
+        localStorage.removeItem(QUOTA_TIMESTAMP_KEY);
+        try {
+          setLogLevel('error');
+        } catch {}
+      }
+    } else {
+      try {
+        setLogLevel('error');
+      } catch {}
+    }
+  } catch (e) {
+    console.error('Error reading quota state from localStorage', e);
+  }
+}
 
 export function isFirestoreQuotaExceeded(): boolean {
   return isQuotaExceeded;
@@ -70,6 +105,18 @@ export function handleFirestoreError(err: any, context?: string): boolean {
   ) {
     if (!isQuotaExceeded) {
       isQuotaExceeded = true;
+      try {
+        setLogLevel('silent');
+      } catch {}
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(QUOTA_EXCEEDED_KEY, 'true');
+          localStorage.setItem(QUOTA_TIMESTAMP_KEY, Date.now().toString());
+        } catch (e) {
+          console.error('Error saving quota state to localStorage', e);
+        }
+      }
+      disableNetwork(db).catch(console.error);
       console.warn(
         `[EduSmart LMS] Firestore daily write quota limit reached (${context || 'operation'}). Automatically active local-first cache mode. All LMS features, readings, quiz, and lessons work uninterrupted.`
       );
