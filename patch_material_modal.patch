@@ -1,0 +1,55 @@
+--- src/components/MaterialDetailModal.tsx
++++ src/components/MaterialDetailModal.tsx
+@@ -11,6 +11,7 @@
+ import { LearningMaterial } from '../types';
+ import { downloadLargeFileFromFirestore } from '../lib/lmsDb';
+ import { getPdfBlob, getPdfArrayBuffer } from '../lib/pdfStorage';
++import { resolvePdfSource, ParsedPdfSource } from '../lib/pdfHelper';
+ 
+ // Configure PDF.js worker
+ if (typeof window !== 'undefined') {
+@@ -34,6 +35,7 @@
+ }) => {
+   // Core States
+   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
++  const [externalSource, setExternalSource] = useState<ParsedPdfSource | null>(null);
+   const [numPages, setNumPages] = useState<number>(0);
+   const [currentPage, setCurrentPage] = useState<number>(1);
+   const [scale, setScale] = useState<number>(window.innerWidth < 768 ? 0.7 : 1.3);
+@@ -181,6 +183,15 @@
+         }
+ 
+         if (!pdfData) {
++          const parsedSource = resolvePdfSource(material.fileUrl || material.fileUrl, material.fileData);
++          if (parsedSource.type !== 'fallback' && parsedSource.embedUrl) {
++             setExternalSource(parsedSource);
++             setIsLoading(false);
++             setPdfDoc(null);
++             setNumPages(1);
++             return;
++          }
++
+           // No binary PDF found, will use rich interactive presentation view
+           if (!isCancelled) {
+             setIsLoading(false);
+@@ -735,6 +746,20 @@
+                   Buka PDF di Tab Baru
+                 </button>
+               </div>
++            ) : externalSource ? (
++              <div className="flex flex-col items-center w-full h-[70vh] py-2">
++                <div className="w-full h-full max-w-5xl bg-white rounded-xl overflow-hidden shadow-2xl border border-slate-200">
++                  <iframe 
++                    src={externalSource.embedUrl} 
++                    className="w-full h-full border-0"
++                    title="PDF Reader Viewer"
++                    allow="autoplay"
++                  ></iframe>
++                </div>
++                <div className="mt-4 flex justify-center">
++                  <a href={externalSource.downloadUrl} target="_blank" rel="noreferrer" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md">Buka di Tab Baru</a>
++                </div>
++              </div>
+             ) : pdfDoc ? (
+               <div className="w-full overflow-hidden flex flex-col items-center justify-center p-2 sm:p-4 bg-slate-100 rounded-3xl min-h-[60vh] border border-slate-200">
+                 {/* Main Canvas Viewport */}

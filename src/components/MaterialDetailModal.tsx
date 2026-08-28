@@ -13,6 +13,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { LearningMaterial } from '../types';
 import { downloadLargeFileFromFirestore } from "../lib/lmsDb";
 import { getPdfBlob, getPdfArrayBuffer } from '../lib/pdfStorage';
+import { resolvePdfSource, ParsedPdfSource } from '../lib/pdfHelper';
 
 // Configure PDF.js worker
 if (typeof window !== 'undefined') {
@@ -50,6 +51,7 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
 
   // PDF.js State
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
+  const [externalSource, setExternalSource] = useState<ParsedPdfSource | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageInputVal, setPageInputVal] = useState<string>('1');
@@ -181,6 +183,15 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
         }
 
         if (!pdfData) {
+          const parsedSource = resolvePdfSource(material.fileUrl || material.fileUrl, material.fileData);
+          if (parsedSource.type !== 'fallback' && parsedSource.embedUrl) {
+             setExternalSource(parsedSource);
+             setIsLoading(false);
+             setPdfDoc(null);
+             setNumPages(1);
+             return;
+          }
+
           // No binary PDF found, will use rich interactive presentation view
           if (!isCancelled) {
             setIsLoading(false);
@@ -734,7 +745,21 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
           {/* TAB 1: MODUL & PDF / INTERACTIVE READER */}
           {activeTab === 'reader' && (
             <div className="w-full flex justify-center py-2">
-              {pdfDoc ? (
+              {externalSource ? (
+                <div className="flex flex-col items-center w-full h-[70vh] py-2">
+                  <div className="w-full h-full max-w-5xl bg-white rounded-xl overflow-hidden shadow-2xl border border-slate-200">
+                    <iframe 
+                      src={externalSource.embedUrl} 
+                      className="w-full h-full border-0"
+                      title="PDF Reader Viewer"
+                      allow="autoplay"
+                    ></iframe>
+                  </div>
+                  <div className="mt-4 flex justify-center">
+                    <a href={externalSource.downloadUrl} target="_blank" rel="noreferrer" className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md">Buka di Tab Baru</a>
+                  </div>
+                </div>
+              ) : pdfDoc ? (
                 /* Native PDF.js Rendering */
                 <div className="flex flex-col items-center space-y-4">
                   <div

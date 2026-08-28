@@ -100,6 +100,10 @@ export const StudentLearningProgressWidget: React.FC<StudentLearningProgressWidg
   });
   const lastItem = recentItems[0];
 
+  // Find active reading assignments
+  const activeReadingAssignments = books.filter(b => b.teacherInstruction || (b.targetPage && b.targetPage > 1));
+  const latestAssignment = activeReadingAssignments.length > 0 ? activeReadingAssignments[activeReadingAssignments.length - 1] : null;
+
   return (
     <div className="rounded-3xl p-6 sm:p-7 glass-card border-2 border-sky-500/35 shadow-xl relative overflow-hidden space-y-6">
       {/* Glow Effects */}
@@ -137,6 +141,37 @@ export const StudentLearningProgressWidget: React.FC<StudentLearningProgressWidg
           <ChevronRight className="w-4 h-4 ml-0.5" />
         </button>
       </div>
+
+      {latestAssignment && (
+        <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-2xl p-4 flex flex-col sm:flex-row items-center gap-4 shadow-xl relative z-10 overflow-hidden">
+          <div className="absolute -right-8 -top-8 w-24 h-24 bg-emerald-500/20 rounded-full blur-2xl pointer-events-none" />
+          
+          <img src={latestAssignment.coverImage} alt={latestAssignment.title} className="w-16 h-20 sm:w-20 sm:h-28 object-cover rounded-xl shadow-lg border border-slate-700 shrink-0" />
+          
+          <div className="flex-1 flex flex-col">
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 bg-emerald-500 text-white text-[10px] font-extrabold rounded uppercase tracking-wide">
+                Tugas Baca: {latestAssignment.targetPage ? `Halaman ${latestAssignment.targetPage}` : 'Instruksi Guru'}
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">{latestAssignment.subject}</span>
+            </div>
+            <h3 className="text-sm sm:text-base font-bold text-white mb-1 line-clamp-1">{latestAssignment.title}</h3>
+            {latestAssignment.teacherInstruction && (
+              <p className="text-xs text-slate-300 italic bg-slate-800/60 p-2 rounded-lg border-l-2 border-emerald-500 mb-2 line-clamp-2">
+                "{latestAssignment.teacherInstruction}"
+              </p>
+            )}
+            
+            <button
+              onClick={() => onOpenBook(latestAssignment, latestAssignment.targetPage)}
+              className="self-start mt-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-900/40 transition cursor-pointer"
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>Buka Sesuai Perintah Guru</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Overall Progress Gauge & Metric Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center relative z-10">

@@ -11,6 +11,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { DigitalBook, LearningMaterial } from '../types';
 import { downloadLargeFileFromFirestore } from "../lib/lmsDb";
 import { getPdfBlob, getPdfArrayBuffer, getPdfBlobUrl } from '../lib/pdfStorage';
+import { resolvePdfSource, ParsedPdfSource } from '../lib/pdfHelper';
 
 interface ChapterItem {
   title: string;
@@ -49,6 +50,7 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
   onProgressUpdate
 }) => {
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
+  const [externalSource, setExternalSource] = useState<ParsedPdfSource | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageInputVal, setPageInputVal] = useState<string>('1');
@@ -68,6 +70,7 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
   const [canScrollUp, setCanScrollUp] = useState<boolean>(false);
   const [scrollProgress, setScrollProgress] = useState<number>(0);
   const [isMarkedCompleted, setIsMarkedCompleted] = useState<boolean>(propIsCompleted);
+  const lastUpdatedProgressRef = useRef<{ page: number; done: boolean; bookId: string } | null>(null);
 
   // Sync completion prop
   useEffect(() => {
@@ -82,14 +85,19 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
     return Math.min(100, Math.max(0, Math.round((currentPage / total) * 100)));
   }, [currentPage, numPages, book, isMarkedCompleted]);
 
-  // Trigger progress updates when page changes
+  // Trigger progress updates only when page or completion status actually changes
   useEffect(() => {
-    if (book && onProgressUpdate && numPages > 0) {
+    if (isOpen && book && onProgressUpdate && numPages > 0) {
+      const prev = lastUpdatedProgressRef.current;
+      if (prev && prev.bookId === book.id && prev.page === currentPage && prev.done === isMarkedCompleted) {
+        return;
+      }
+      lastUpdatedProgressRef.current = { page: currentPage, done: isMarkedCompleted, bookId: book.id };
       const total = numPages || 1;
       const pct = isMarkedCompleted ? 100 : Math.min(100, Math.max(0, Math.round((currentPage / total) * 100)));
       onProgressUpdate(book.id, pct, isMarkedCompleted || pct >= 100, currentPage, total);
     }
-  }, [currentPage, numPages, isMarkedCompleted, book?.id]);
+  }, [isOpen, currentPage, numPages, isMarkedCompleted, book?.id]);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -343,6 +351,15 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
         }
 
         if (!pdfData) {
+          const parsedSource = resolvePdfSource(book.fileUrl || book.fileUrl, book.fileData);
+          if (parsedSource.type !== 'fallback' && parsedSource.embedUrl) {
+             setExternalSource(parsedSource);
+             setIsLoading(false);
+             setPdfDoc(null);
+             setNumPages(1); // Usually we don't know total pages for iframe
+             return;
+          }
+
           // No binary PDF found, this is a simulated starter book
           if (!isCancelled) {
             const total = book.totalPages || 10;
@@ -689,127 +706,11 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
 
           {/* Action & Reader Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
-            {/* Desktop Only Page Navigation Controls */}
-            {!isMobile && (
-              <div className="flex items-center bg-blue-50 px-2 py-1 rounded-xl border border-blue-200 text-xs">
-                <button
-                  onClick={() => setCurrentPage(1)}
-                  disabled={currentPage <= 1 || isLoading}
-                  className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
-                  title="Halaman Pertama"
-                >
-                  <ChevronsLeft className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={handlePrevPage}
-                  disabled={currentPage <= 1 || isLoading}
-                  className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
-                  title="Halaman Sebelumnya"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
+            
 
-                <div className="flex items-center gap-1 mx-1 font-mono text-[11px] text-slate-700">
-                  <input
-                    type="text"
-                    value={pageInputVal}
-                    onChange={handlePageInputChange}
-                    onKeyDown={handlePageInputKeyDown}
-                    onBlur={() => setPageInputVal(currentPage.toString())}
-                    disabled={isLoading}
-                    className="w-10 text-center bg-slate-50 border border-slate-300 rounded py-0.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500"
-                  />
-                  <span className="text-slate-500">/ {totalDisplayPages}</span>
-                </div>
+            
 
-                <button
-                  onClick={handleNextPage}
-                  disabled={currentPage >= totalDisplayPages || isLoading}
-                  className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
-                  title="Halaman Selanjutnya"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setCurrentPage(totalDisplayPages)}
-                  disabled={currentPage >= totalDisplayPages || isLoading}
-                  className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
-                  title="Halaman Terakhir"
-                >
-                  <ChevronsRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            {/* Quick Scroll Header Shortcuts */}
-            <div className="hidden lg:flex items-center bg-white px-1 py-1 rounded-xl border border-slate-200 text-xs gap-0.5">
-              <button
-                onClick={handleScrollStepUp}
-                className="px-2 py-1 text-slate-700 hover:text-blue-600 hover:bg-blue-50 rounded-lg flex items-center gap-1 font-semibold text-[11px] cursor-pointer transition"
-                title="Gulir Naik (Arrow Up)"
-              >
-                <ChevronUp className="w-3.5 h-3.5 text-blue-600" />
-                <span>Atas</span>
-              </button>
-              <button
-                onClick={handleScrollStepDown}
-                className="px-2 py-1 text-slate-700 hover:text-blue-600 hover:bg-blue-50 rounded-lg flex items-center gap-1 font-semibold text-[11px] cursor-pointer transition"
-                title="Gulir Turun (Arrow Down)"
-              >
-                <ChevronDown className="w-3.5 h-3.5 text-blue-600" />
-                <span>Bawah</span>
-              </button>
-            </div>
-
-            {/* Zoom Controls (Active in PDF mode) - Desktop Only */}
-            {pdfDoc && !isMobile && (
-              <div className="hidden md:flex items-center bg-white px-1.5 py-1 rounded-xl border border-slate-200 text-xs gap-0.5">
-                <button
-                  onClick={handleZoomOut}
-                  className="p-1 text-slate-500 hover:text-slate-900 cursor-pointer rounded hover:bg-slate-100"
-                  title="Perkecil (-)"
-                >
-                  <ZoomOut className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={handleFitWidth}
-                  className="px-1.5 py-0.5 text-[11px] text-slate-600 font-mono hover:text-indigo-600 cursor-pointer rounded hover:bg-slate-100"
-                  title="Pas Lebar (Fit Width)"
-                >
-                  {Math.round(scale * 100)}%
-                </button>
-                <button
-                  onClick={handleZoomIn}
-                  className="p-1 text-slate-500 hover:text-slate-900 cursor-pointer rounded hover:bg-slate-100"
-                  title="Perbesar (+)"
-                >
-                  <ZoomIn className="w-3.5 h-3.5" />
-                </button>
-                <div className="w-[1px] h-3.5 bg-slate-200 mx-0.5" />
-                <button
-                  onClick={handleFitHeight}
-                  className="px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded cursor-pointer"
-                  title="Pas 1 Layar Utuh (Fit Height - Agar Teks Bawah Tidak Terpotong)"
-                >
-                  Pas Layar
-                </button>
-                <button
-                  onClick={handleFitWidth}
-                  className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded cursor-pointer"
-                  title="Pas Lebar Halaman (Fit Width)"
-                >
-                  Pas Lebar
-                </button>
-                <div className="w-[1px] h-3.5 bg-slate-200 mx-0.5" />
-                <button
-                  onClick={handleRotate}
-                  className="p-1 text-slate-500 hover:text-slate-900 cursor-pointer rounded hover:bg-slate-100"
-                  title="Putar 90 Derajat"
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
+            
 
             {/* Download & External links - Desktop Only */}
             {allowDownload && !isMobile && (
@@ -834,8 +735,7 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
               </>
             )}
 
-            {!isMobile && (
-              <button
+            <button
                 onClick={() => setShowChaptersSidebar(!showChaptersSidebar)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer ${
                   showChaptersSidebar 
@@ -847,7 +747,6 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
                 <ListTree className="w-4 h-4" />
                 <span className="hidden sm:inline">Daftar Bab</span>
               </button>
-            )}
 
             {/* Full Screen Button for Immersive Reading */}
             <button
@@ -1035,6 +934,22 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
                   </button>
                 )}
               </div>
+            ) : externalSource ? (
+              <div className="flex flex-col items-center w-full h-[85vh] py-2">
+                <div className="w-full h-full max-w-5xl bg-white rounded-xl overflow-hidden shadow-2xl border border-slate-200">
+                  <iframe 
+                    src={externalSource.embedUrl} 
+                    className="w-full h-full border-0"
+                    title="PDF Reader Viewer"
+                    allow="autoplay"
+                  ></iframe>
+                </div>
+                <div className="mt-4 flex flex-wrap justify-center gap-3">
+                  <a href={externalSource.downloadUrl} target="_blank" rel="noreferrer" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-2">
+                     <ExternalLink className="w-4 h-4" /> Buka di Tab Baru
+                  </a>
+                </div>
+              </div>
             ) : pdfDoc ? (
               /* High-DPI Canvas Rendering Engine with Generous pb-48 Bottom Scroll Margin */
               <div className="flex flex-col items-center py-2 pb-48 min-h-full w-full">
@@ -1062,32 +977,7 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
                   )}
                 </div>
 
-                {/* Bottom of Page Completion Card with Easy Scroll-To-Top & Next Page */}
-                <div className="mt-8 p-4 bg-white/95 border border-blue-200 rounded-2xl shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3 max-w-xl w-full text-xs">
-                  <div className="text-center sm:text-left">
-                    <p className="font-bold text-slate-800">Bagian Bawah Halaman {currentPage}</p>
-                    <p className="text-slate-500 text-[11px]">Gunakan tombol di samping atau di bawah untuk kembali ke atas atau ke halaman berikutnya.</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleScrollToTop}
-                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer transition"
-                    >
-                      <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Ke Puncak</span>
-                    </button>
-                    {currentPage < totalDisplayPages && (
-                      <button
-                        onClick={handleNextPage}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer transition shadow-md shadow-blue-900/20"
-                      >
-                        <span>Hal. Selanjutnya</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
                 </div>
-              </div>
             ) : (
               /* Beautiful Simulated Book/Material Reader (For items without raw binary upload) */
               <div className="w-full flex justify-center py-2 sm:py-6 pb-48">
@@ -1124,7 +1014,7 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
                         {book.description || 'Materi ajar ini disiapkan oleh guru untuk dibaca dan dipahami langsung oleh siswa melalui webapp.'}
                       </div>
                     </div>
-                  ) : (
+            ) : (
                     <div className="space-y-4 text-slate-800 text-xs sm:text-sm leading-relaxed">
                       <h3 className="font-bold text-base text-slate-900 border-b border-slate-100 pb-2">
                         BAGIAN {currentPage - 1}: Pembahasan Modul & Ringkasan Materi
@@ -1149,154 +1039,44 @@ export const BookReaderModal: React.FC<BookReaderModalProps> = ({
               </div>
             )}
           </div>
-
-          {/* DEDICATED HIGH-VISIBILITY UP & DOWN CONTROLLER (Right-Side Vertical Controller) */}
-          <div className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center gap-1.5 bg-slate-900/95 backdrop-blur-md p-2 rounded-2xl border border-slate-700/80 shadow-2xl ring-1 ring-white/10 select-none">
-            {/* Direct Scroll To Top */}
-            <button
-              onClick={handleScrollToTop}
-              title="Langsung ke Puncak Halaman (Home)"
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-white transition-all hover:scale-110 active:scale-95 cursor-pointer shadow"
-            >
-              <ChevronsLeft className="w-4 h-4 rotate-90" />
-            </button>
-
-            {/* Primary Step UP Button (Click for step, hold for continuous scroll) */}
-            <button
-              onClick={handleScrollStepUp}
-              onMouseDown={() => startContinuousScroll('up')}
-              onMouseUp={stopContinuousScroll}
-              onMouseLeave={stopContinuousScroll}
-              onTouchStart={() => startContinuousScroll('up')}
-              onTouchEnd={stopContinuousScroll}
-              title="Klik untuk Gulir Naik / Tahan untuk Gulir Cepat (Arrow Up / Key K)"
-              className="flex flex-col items-center justify-center px-3.5 py-3 rounded-xl bg-gradient-to-b from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:from-blue-700 active:to-indigo-700 text-white font-extrabold transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-lg shadow-indigo-950/50 border border-blue-400/30"
-            >
-              <ChevronUp className="w-6 h-6 stroke-[3]" />
-              <span className="text-[10px] uppercase tracking-widest font-black">UP</span>
-            </button>
-
-            {/* Interactive Scroll Position Track (Click anywhere to jump to that part of page) */}
-            <div 
-              onClick={handleScrollTrackClick}
-              title="Klik di mana saja pada bar untuk melompat langsung"
-              className="w-2.5 h-16 bg-slate-800 hover:bg-slate-750 rounded-full my-1 overflow-hidden relative cursor-pointer group p-0.5 border border-slate-700"
-            >
-              <div 
-                className="w-full bg-sky-400 group-hover:bg-sky-300 rounded-full transition-all duration-100 shadow-[0_0_8px_rgba(56,189,248,0.8)]"
-                style={{ height: `${Math.max(8, scrollProgress)}%` }}
-              />
-            </div>
-
-            {/* Primary Step DOWN Button (Click for step, hold for continuous scroll) */}
-            <button
-              onClick={handleScrollStepDown}
-              onMouseDown={() => startContinuousScroll('down')}
-              onMouseUp={stopContinuousScroll}
-              onMouseLeave={stopContinuousScroll}
-              onTouchStart={() => startContinuousScroll('down')}
-              onTouchEnd={stopContinuousScroll}
-              title="Klik untuk Gulir Turun / Tahan untuk Gulir Cepat (Arrow Down / Key J)"
-              className="flex flex-col items-center justify-center px-3.5 py-3 rounded-xl bg-gradient-to-b from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:from-blue-700 active:to-indigo-700 text-white font-extrabold transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-lg shadow-indigo-950/50 border border-blue-400/30"
-            >
-              <span className="text-[10px] uppercase tracking-widest font-black">DOWN</span>
-              <ChevronDown className="w-6 h-6 stroke-[3]" />
-            </button>
-
-            {/* Direct Scroll To Bottom */}
-            <button
-              onClick={handleScrollToBottom}
-              title="Langsung ke Bagian Paling Bawah (End / Lihat Tabel & Catatan Bawah)"
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-white transition-all hover:scale-110 active:scale-95 cursor-pointer shadow"
-            >
-              <ChevronsRight className="w-4 h-4 rotate-90" />
-            </button>
+        </div>
+        {/* UNIVERSAL FLOATING PAGINATION PILL */}
+        <div className="absolute bottom-6 sm:bottom-10 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 sm:gap-3 bg-slate-900/90 backdrop-blur-md px-3 sm:px-5 py-2 sm:py-3 rounded-full border border-slate-700/50 shadow-[0_10px_40px_rgba(0,0,0,0.3)] text-white">
+          <button onClick={handlePrevPage} disabled={currentPage <= 1 || isLoading} className="p-1 sm:p-2 hover:bg-slate-700 active:bg-slate-600 rounded-full disabled:opacity-30 transition-colors">
+            <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" />
+          </button>
+          
+          <div className="flex items-center gap-2 px-1 sm:px-2">
+            <input 
+              type="number"
+              value={pageInputVal}
+              onChange={handlePageInputChange}
+              onKeyDown={handlePageInputKeyDown}
+              onBlur={() => setPageInputVal(currentPage.toString())}
+              disabled={isLoading}
+              className="w-12 sm:w-14 text-center bg-slate-800 text-white rounded-lg border border-slate-600 focus:outline-none focus:border-blue-500 text-sm sm:text-base py-1 font-bold font-mono transition-colors"
+            />
+            <span className="text-slate-400 text-sm sm:text-base font-bold font-mono">/ {totalDisplayPages}</span>
           </div>
+
+          <button onClick={handleNextPage} disabled={currentPage >= totalDisplayPages || isLoading} className="p-1 sm:p-2 hover:bg-slate-700 active:bg-slate-600 rounded-full disabled:opacity-30 transition-colors">
+            <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
+          </button>
+          
+          {pdfDoc && (
+            <>
+              <div className="w-[2px] h-6 bg-slate-700 mx-1 sm:mx-2 rounded-full" />
+              <button onClick={handleZoomOut} className="p-1 sm:p-2 hover:bg-slate-700 active:bg-slate-600 rounded-full text-slate-300 transition-colors" title="Perkecil (-)">
+                <ZoomOut className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+              <span className="text-xs sm:text-sm font-bold font-mono text-slate-300 w-10 sm:w-12 text-center">{Math.round(scale * 100)}%</span>
+              <button onClick={handleZoomIn} className="p-1 sm:p-2 hover:bg-slate-700 active:bg-slate-600 rounded-full text-slate-300 transition-colors" title="Perbesar (+)">
+                <ZoomIn className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+            </>
+          )}
         </div>
 
-        {/* Mobile Bottom Toolbar */}
-        {isMobile && (
-          <div className="px-4 py-2.5 bg-[#e2ecf8]/95 backdrop-blur-md border-t border-blue-200 flex items-center justify-between shrink-0 z-30 shadow-lg">
-            <button
-              onClick={() => setShowChaptersSidebar(!showChaptersSidebar)}
-              className={`p-2 rounded-xl border transition-all ${
-                showChaptersSidebar 
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
-                  : 'bg-white text-slate-700 border-slate-200'
-              }`}
-            >
-              <ListTree className="w-4 h-4" />
-            </button>
-
-            {/* Mobile Scroll Shortcuts */}
-            <div className="flex items-center gap-1">
-              <button
-                onClick={handleScrollStepUp}
-                className="px-2.5 py-1.5 bg-blue-600 text-white rounded-xl font-bold text-xs flex items-center gap-1 shadow-sm"
-              >
-                <ChevronUp className="w-4 h-4" />
-                <span>Atas</span>
-              </button>
-              <button
-                onClick={handleScrollStepDown}
-                className="px-2.5 py-1.5 bg-blue-600 text-white rounded-xl font-bold text-xs flex items-center gap-1 shadow-sm"
-              >
-                <ChevronDown className="w-4 h-4" />
-                <span>Bawah</span>
-              </button>
-            </div>
-
-            {/* Page Navigation for Mobile */}
-            <div className="flex items-center bg-white px-2 py-1 rounded-xl border border-blue-200 shadow-xs">
-              <button
-                onClick={handlePrevPage}
-                disabled={currentPage <= 1 || isLoading}
-                className="p-1 text-slate-600 disabled:opacity-30 cursor-pointer"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              
-              <div className="flex items-center gap-1 mx-1 text-xs font-bold text-slate-700">
-                <input
-                  type="number"
-                  value={pageInputVal}
-                  onChange={handlePageInputChange}
-                  onKeyDown={handlePageInputKeyDown}
-                  onBlur={() => setPageInputVal(currentPage.toString())}
-                  disabled={isLoading}
-                  className="w-8 text-center bg-slate-50 border border-slate-300 rounded py-0.5 font-mono text-xs focus:outline-none focus:border-indigo-500"
-                />
-                <span className="text-slate-400">/{totalDisplayPages}</span>
-              </div>
-
-              <button
-                onClick={handleNextPage}
-                disabled={currentPage >= totalDisplayPages || isLoading}
-                className="p-1 text-slate-600 disabled:opacity-30 cursor-pointer"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Downloader or zoom info */}
-            {allowDownload && rawBlobUrl ? (
-              <button
-                onClick={handleDownload}
-                className="p-2 bg-indigo-600 text-white rounded-xl shadow-sm cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-              </button>
-            ) : (
-              <button
-                onClick={handleFitHeight}
-                className="p-2 bg-white text-indigo-700 border border-indigo-200 rounded-xl font-semibold text-xs"
-                title="Pas Layar"
-              >
-                Fit
-              </button>
-            )}
-          </div>
-        )}
       </motion.div>
     </div>
   );

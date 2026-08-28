@@ -8,7 +8,7 @@ import {
   getDocs,
   query
 } from "firebase/firestore";
-import {  db } from './firebase';
+import { db } from './firebase';
 import { 
   LearningMaterial,
   QuizExam,
@@ -36,17 +36,6 @@ import {
 const MATERIALS_COL = 'materials';
 const QUIZZES_COL = 'quizzes';
 const BOOKS_COL = 'books';
-function cleanData(obj: any): any {
-  if (obj === null || typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(cleanData);
-  const result: any = {};
-  for (const key of Object.keys(obj)) {
-    if (obj[key] !== undefined) {
-      result[key] = cleanData(obj[key]);
-    }
-  }
-  return result;
-}
 const VIDEOS_COL = 'videos';
 const USERS_COL = 'users';
 const ANNOUNCEMENTS_COL = 'announcements';
@@ -58,6 +47,99 @@ const STUDENT_PROGRESS_COL = 'student_progress';
 
 const DELETED_IDS_KEY = 'edusmart_lms_deleted_ids';
 const SETTINGS_LOCAL_KEY = 'edusmart_lms_school_settings';
+const SEED_FLAG_KEY = 'edusmart_db_seeded_v3';
+
+// Quota and Error Circuit Breaker
+let isQuotaExceeded = false;
+
+export function isFirestoreQuotaExceeded(): boolean {
+  return isQuotaExceeded;
+}
+
+export function handleFirestoreError(err: any, context?: string): boolean {
+  if (!err) return false;
+  const msg = String(err?.message || err || '');
+  const code = String(err?.code || '');
+  
+  if (
+    code === 'resource-exhausted' ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('Quota exceeded') ||
+    msg.includes('Free daily write units')
+  ) {
+    if (!isQuotaExceeded) {
+      isQuotaExceeded = true;
+      console.warn(
+        `[EduSmart LMS] Firestore daily write quota limit reached (${context || 'operation'}). Automatically active local-first cache mode. All LMS features, readings, quiz, and lessons work uninterrupted.`
+      );
+    }
+    return true;
+  }
+  return false;
+}
+
+function cleanData(obj: any): any {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(cleanData);
+  const result: any = {};
+  for (const key of Object.keys(obj)) {
+    if (obj[key] !== undefined) {
+      result[key] = cleanData(obj[key]);
+    }
+  }
+  return result;
+}
+
+// Local Cache Helpers
+function getLocalCache<T>(key: string, fallback: T[]): T[] {
+  try {
+    const raw = localStorage.getItem(`edusmart_cache_${key}`);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function setLocalCache<T>(key: string, items: T[]) {
+  try {
+    localStorage.setItem(`edusmart_cache_${key}`, JSON.stringify(items));
+  } catch (e) {
+    // If local storage is full (e.g., big Base64 files), keep lightweight cache
+    try {
+      if (Array.isArray(items)) {
+        const lightweight = items.slice(0, 50);
+        localStorage.setItem(`edusmart_cache_${key}`, JSON.stringify(lightweight));
+      }
+    } catch {}
+  }
+}
+
+// Subscribers Dispatcher for Offline / Local-first state synchronization
+type SubCallback<T> = (items: T) => void;
+const localSubscribers: Record<string, Set<SubCallback<any>>> = {
+  materials: new Set(),
+  quizzes: new Set(),
+  books: new Set(),
+  videos: new Set(),
+  users: new Set(),
+  announcements: new Set(),
+  schedules: new Set(),
+  attendance: new Set(),
+  submissions: new Set(),
+  settings: new Set(),
+};
+
+function notifyLocalSubscribers(key: string, data: any) {
+  const subs = localSubscribers[key];
+  if (subs) {
+    subs.forEach(cb => {
+      try { cb(data); } catch {}
+    });
+  }
+}
 
 export function getDeletedIds(): Set<string> {
   try {
@@ -95,20 +177,49 @@ export async function purgeDefaultUsersFromDb() {
   const deletedSet = getDeletedIds();
   for (const id of OLD_DEFAULT_USER_IDS) {
     markIdAsDeleted(id);
-    try {
-      await deleteDoc(doc(db, USERS_COL, id));
-    } catch (err) {
-      console.warn(`Error deleting default user ${id}:`, err);
+    if (!isQuotaExceeded) {
+      try {
+        await deleteDoc(doc(db, USERS_COL, id));
+      } catch (err) {
+        handleFirestoreError(err, 'purgeDefaultUsers');
+      }
     }
   }
 }
 
-// Helper to seed database if empty
+// Helper to seed database gently only once
 export async function seedInitialDataIfEmpty() {
-  forcePurgeMockContent();
+  if (typeof window === 'undefined') return;
+
+  // Initialize local cache if not yet loaded
+  if (!localStorage.getItem(`edusmart_cache_${MATERIALS_COL}`)) {
+    setLocalCache(MATERIALS_COL, MOCK_MATERIALS);
+  }
+  if (!localStorage.getItem(`edusmart_cache_${QUIZZES_COL}`)) {
+    setLocalCache(QUIZZES_COL, MOCK_QUIZZES);
+  }
+  if (!localStorage.getItem(`edusmart_cache_${BOOKS_COL}`)) {
+    setLocalCache(BOOKS_COL, MOCK_BOOKS);
+  }
+  if (!localStorage.getItem(`edusmart_cache_${VIDEOS_COL}`)) {
+    setLocalCache(VIDEOS_COL, MOCK_VIDEOS);
+  }
+  if (!localStorage.getItem(`edusmart_cache_${USERS_COL}`)) {
+    setLocalCache(USERS_COL, MOCK_USERS);
+  }
+  if (!localStorage.getItem(`edusmart_cache_${ANNOUNCEMENTS_COL}`)) {
+    setLocalCache(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS);
+  }
+  if (!localStorage.getItem(`edusmart_cache_${SCHEDULES_COL}`)) {
+    setLocalCache(SCHEDULES_COL, MOCK_SCHEDULES);
+  }
+
+  // If already seeded or quota is exceeded, do not perform expensive write sweeps
+  if (localStorage.getItem(SEED_FLAG_KEY) || isQuotaExceeded) {
+    return;
+  }
+
   const deletedSet = getDeletedIds();
-  // Always clean up old default test users from Firestore server
-  await purgeDefaultUsersFromDb();
 
   try {
     const usersSnap = await getDocs(collection(db, USERS_COL));
@@ -119,86 +230,10 @@ export async function seedInitialDataIfEmpty() {
         }
       }
     }
+    localStorage.setItem(SEED_FLAG_KEY, 'true');
   } catch (err) {
-    console.warn('Notice: user collection seeding skipped or already initialized:', err);
-  }
-
-  try {
-    const matSnap = await getDocs(collection(db, MATERIALS_COL));
-    if (matSnap.empty) {
-      for (const item of MOCK_MATERIALS) {
-        if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, MATERIALS_COL, item.id), cleanData(item));
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Notice: materials collection seeding check:', err);
-  }
-
-  try {
-    const quizSnap = await getDocs(collection(db, QUIZZES_COL));
-    if (quizSnap.empty) {
-      for (const item of MOCK_QUIZZES) {
-        if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, QUIZZES_COL, item.id), cleanData(item));
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Notice: quizzes collection seeding check:', err);
-  }
-
-  try {
-    const bookSnap = await getDocs(collection(db, BOOKS_COL));
-    if (bookSnap.empty) {
-      for (const item of MOCK_BOOKS) {
-        if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, BOOKS_COL, item.id), cleanData(item));
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Notice: books collection seeding check:', err);
-  }
-
-  try {
-    const vidSnap = await getDocs(collection(db, VIDEOS_COL));
-    if (vidSnap.empty) {
-      for (const item of MOCK_VIDEOS) {
-        if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, VIDEOS_COL, item.id), cleanData(item));
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Notice: videos collection seeding check:', err);
-  }
-
-  try {
-    const annSnap = await getDocs(collection(db, ANNOUNCEMENTS_COL));
-    if (annSnap.empty) {
-      for (const item of MOCK_ANNOUNCEMENTS) {
-        if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, ANNOUNCEMENTS_COL, item.id), cleanData(item));
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Notice: announcements collection seeding check:', err);
-  }
-
-  try {
-    const schedSnap = await getDocs(collection(db, SCHEDULES_COL));
-    if (schedSnap.empty) {
-      for (const item of MOCK_SCHEDULES) {
-        if (!deletedSet.has(item.id)) {
-          await setDoc(doc(db, SCHEDULES_COL, item.id), cleanData(item));
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Notice: schedules collection seeding check:', err);
+    handleFirestoreError(err, 'seedInitialData');
+    localStorage.setItem(SEED_FLAG_KEY, 'true');
   }
 }
 
@@ -206,7 +241,28 @@ export async function seedInitialDataIfEmpty() {
 export async function resetAllDatabaseData() {
   try {
     localStorage.removeItem(DELETED_IDS_KEY);
+    localStorage.removeItem(SEED_FLAG_KEY);
   } catch {}
+
+  setLocalCache(MATERIALS_COL, MOCK_MATERIALS);
+  setLocalCache(QUIZZES_COL, MOCK_QUIZZES);
+  setLocalCache(BOOKS_COL, MOCK_BOOKS);
+  setLocalCache(VIDEOS_COL, MOCK_VIDEOS);
+  setLocalCache(USERS_COL, MOCK_USERS);
+  setLocalCache(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS);
+  setLocalCache(SCHEDULES_COL, MOCK_SCHEDULES);
+  setLocalCache(ATTENDANCE_COL, []);
+  setLocalCache(SUBMISSIONS_COL, []);
+
+  notifyLocalSubscribers('materials', MOCK_MATERIALS);
+  notifyLocalSubscribers('quizzes', MOCK_QUIZZES);
+  notifyLocalSubscribers('books', MOCK_BOOKS);
+  notifyLocalSubscribers('videos', MOCK_VIDEOS);
+  notifyLocalSubscribers('users', MOCK_USERS);
+  notifyLocalSubscribers('announcements', MOCK_ANNOUNCEMENTS);
+  notifyLocalSubscribers('schedules', MOCK_SCHEDULES);
+
+  if (isQuotaExceeded) return;
 
   const collectionsToClear = [
     MATERIALS_COL,
@@ -226,229 +282,414 @@ export async function resetAllDatabaseData() {
         await deleteDoc(doc(db, colName, d.id));
       }
     } catch (err) {
-      console.error(`Error clearing collection ${colName}:`, err);
+      handleFirestoreError(err, `clear_${colName}`);
     }
   }
 
   // Re-seed default clean state
-  for (const item of MOCK_MATERIALS) {
-    await setDoc(doc(db, MATERIALS_COL, item.id), cleanData(item));
-  }
-  for (const item of MOCK_QUIZZES) {
-    await setDoc(doc(db, QUIZZES_COL, item.id), cleanData(item));
-  }
-  for (const item of MOCK_BOOKS) {
-    await setDoc(doc(db, BOOKS_COL, item.id), cleanData(item));
-  }
-  for (const item of MOCK_VIDEOS) {
-    await setDoc(doc(db, VIDEOS_COL, item.id), cleanData(item));
-  }
-  for (const item of MOCK_USERS) {
-    await setDoc(doc(db, USERS_COL, item.id), cleanData(item));
-  }
-  for (const item of MOCK_ANNOUNCEMENTS) {
-    await setDoc(doc(db, ANNOUNCEMENTS_COL, item.id), cleanData(item));
-  }
-  for (const item of MOCK_SCHEDULES) {
-    await setDoc(doc(db, SCHEDULES_COL, item.id), cleanData(item));
+  try {
+    for (const item of MOCK_MATERIALS) await setDoc(doc(db, MATERIALS_COL, item.id), cleanData(item));
+    for (const item of MOCK_QUIZZES) await setDoc(doc(db, QUIZZES_COL, item.id), cleanData(item));
+    for (const item of MOCK_BOOKS) await setDoc(doc(db, BOOKS_COL, item.id), cleanData(item));
+    for (const item of MOCK_VIDEOS) await setDoc(doc(db, VIDEOS_COL, item.id), cleanData(item));
+    for (const item of MOCK_USERS) await setDoc(doc(db, USERS_COL, item.id), cleanData(item));
+    for (const item of MOCK_ANNOUNCEMENTS) await setDoc(doc(db, ANNOUNCEMENTS_COL, item.id), cleanData(item));
+    for (const item of MOCK_SCHEDULES) await setDoc(doc(db, SCHEDULES_COL, item.id), cleanData(item));
+  } catch (err) {
+    handleFirestoreError(err, 'reset_reseed');
   }
 }
 
+// ----------------------------------------------------------------------
 // Materials
+// ----------------------------------------------------------------------
 export function subscribeMaterials(callback: (items: LearningMaterial[]) => void) {
+  localSubscribers['materials'].add(callback);
+  const deletedSet = getDeletedIds();
+  const initial = getLocalCache(MATERIALS_COL, MOCK_MATERIALS).filter(m => !deletedSet.has(m.id));
+  callback(initial);
+
   const q = query(collection(db, MATERIALS_COL));
-  return onSnapshot(q, (snapshot) => {
-    const deletedSet = getDeletedIds();
+  const unsub = onSnapshot(q, (snapshot) => {
+    const currentDeleted = getDeletedIds();
     const items: LearningMaterial[] = [];
     snapshot.forEach((doc) => {
       const data = doc.data() as LearningMaterial;
-      if (!deletedSet.has(data.id)) {
+      if (!currentDeleted.has(data.id)) {
         items.push(data);
       }
     });
     if (items.length > 0) {
+      setLocalCache(MATERIALS_COL, items);
       callback(items);
     } else if (snapshot.empty) {
-      callback(MOCK_MATERIALS.filter(m => !deletedSet.has(m.id)));
+      const fallback = MOCK_MATERIALS.filter(m => !currentDeleted.has(m.id));
+      callback(fallback);
     } else {
       callback([]);
     }
   }, (err) => {
-    console.warn('Firestore materials snapshot notice:', err);
-    const deletedSet = getDeletedIds();
-    callback(MOCK_MATERIALS.filter(m => !deletedSet.has(m.id)));
+    handleFirestoreError(err, 'materials_subscribe');
+    const currentDeleted = getDeletedIds();
+    const fallback = getLocalCache(MATERIALS_COL, MOCK_MATERIALS).filter(m => !currentDeleted.has(m.id));
+    callback(fallback);
   });
+
+  return () => {
+    localSubscribers['materials'].delete(callback);
+    unsub();
+  };
 }
 
 export async function addMaterialToDb(material: LearningMaterial) {
   unmarkIdAsDeleted(material.id);
+  const current = getLocalCache<LearningMaterial>(MATERIALS_COL, MOCK_MATERIALS).filter(m => m.id !== material.id);
+  const updated = [material, ...current];
+  setLocalCache(MATERIALS_COL, updated);
+  notifyLocalSubscribers('materials', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, MATERIALS_COL, material.id), cleanData(material));
   } catch (err) {
-    console.warn('addMaterialToDb error:', err);
+    handleFirestoreError(err, 'addMaterialToDb');
+  }
+}
+
+export async function updateMaterialInDb(material: LearningMaterial) {
+  unmarkIdAsDeleted(material.id);
+  const current = getLocalCache<LearningMaterial>(MATERIALS_COL, MOCK_MATERIALS);
+  const index = current.findIndex(m => m.id === material.id);
+  let updated: LearningMaterial[];
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = { ...updated[index], ...material };
+  } else {
+    updated = [material, ...current];
+  }
+  setLocalCache(MATERIALS_COL, updated);
+  notifyLocalSubscribers('materials', updated);
+
+  if (isQuotaExceeded) return;
+  try {
+    await setDoc(doc(db, MATERIALS_COL, material.id), cleanData(material), { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, 'updateMaterialInDb');
   }
 }
 
 export async function deleteMaterialFromDb(id: string) {
   markIdAsDeleted(id);
+  const current = getLocalCache<LearningMaterial>(MATERIALS_COL, MOCK_MATERIALS);
+  const updated = current.filter(m => m.id !== id);
+  setLocalCache(MATERIALS_COL, updated);
+  notifyLocalSubscribers('materials', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await deleteDoc(doc(db, MATERIALS_COL, id));
-    // Clean up associated file chunks if any
     for (let i = 0; i < 60; i++) {
       const chunkId = `${id}_chunk_${i}`;
       deleteDoc(doc(db, 'file_chunks', chunkId)).catch(() => {});
     }
   } catch (err) {
-    console.warn('deleteMaterialFromDb error:', err);
+    handleFirestoreError(err, 'deleteMaterialFromDb');
   }
 }
 
+// ----------------------------------------------------------------------
 // Quizzes
+// ----------------------------------------------------------------------
 export function subscribeQuizzes(callback: (items: QuizExam[]) => void) {
+  localSubscribers['quizzes'].add(callback);
+  const deletedSet = getDeletedIds();
+  const initial = getLocalCache(QUIZZES_COL, MOCK_QUIZZES).filter(q => !deletedSet.has(q.id));
+  callback(initial);
+
   const q = query(collection(db, QUIZZES_COL));
-  return onSnapshot(q, (snapshot) => {
-    const deletedSet = getDeletedIds();
+  const unsub = onSnapshot(q, (snapshot) => {
+    const currentDeleted = getDeletedIds();
     const items: QuizExam[] = [];
     snapshot.forEach((doc) => {
       const data = doc.data() as QuizExam;
-      if (!deletedSet.has(data.id)) {
+      if (!currentDeleted.has(data.id)) {
         items.push(data);
       }
     });
     if (items.length > 0) {
+      setLocalCache(QUIZZES_COL, items);
       callback(items);
     } else if (snapshot.empty) {
-      callback(MOCK_QUIZZES.filter(q => !deletedSet.has(q.id)));
+      callback(MOCK_QUIZZES.filter(q => !currentDeleted.has(q.id)));
     } else {
       callback([]);
     }
   }, (err) => {
-    console.warn('Firestore quizzes snapshot notice:', err);
-    const deletedSet = getDeletedIds();
-    callback(MOCK_QUIZZES.filter(q => !deletedSet.has(q.id)));
+    handleFirestoreError(err, 'quizzes_subscribe');
+    const currentDeleted = getDeletedIds();
+    callback(getLocalCache(QUIZZES_COL, MOCK_QUIZZES).filter(q => !currentDeleted.has(q.id)));
   });
+
+  return () => {
+    localSubscribers['quizzes'].delete(callback);
+    unsub();
+  };
 }
 
 export async function addQuizToDb(quiz: QuizExam) {
   unmarkIdAsDeleted(quiz.id);
+  const current = getLocalCache<QuizExam>(QUIZZES_COL, MOCK_QUIZZES).filter(q => q.id !== quiz.id);
+  const updated = [quiz, ...current];
+  setLocalCache(QUIZZES_COL, updated);
+  notifyLocalSubscribers('quizzes', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, QUIZZES_COL, quiz.id), cleanData(quiz));
   } catch (err) {
-    console.warn('addQuizToDb error:', err);
+    handleFirestoreError(err, 'addQuizToDb');
+  }
+}
+
+export async function updateQuizInDb(quiz: QuizExam) {
+  unmarkIdAsDeleted(quiz.id);
+  const current = getLocalCache<QuizExam>(QUIZZES_COL, MOCK_QUIZZES);
+  const index = current.findIndex(q => q.id === quiz.id);
+  let updated: QuizExam[];
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = { ...updated[index], ...quiz };
+  } else {
+    updated = [quiz, ...current];
+  }
+  setLocalCache(QUIZZES_COL, updated);
+  notifyLocalSubscribers('quizzes', updated);
+
+  if (isQuotaExceeded) return;
+  try {
+    await setDoc(doc(db, QUIZZES_COL, quiz.id), cleanData(quiz), { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, 'updateQuizInDb');
   }
 }
 
 export async function deleteQuizFromDb(id: string) {
   markIdAsDeleted(id);
+  const current = getLocalCache<QuizExam>(QUIZZES_COL, MOCK_QUIZZES);
+  const updated = current.filter(q => q.id !== id);
+  setLocalCache(QUIZZES_COL, updated);
+  notifyLocalSubscribers('quizzes', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await deleteDoc(doc(db, QUIZZES_COL, id));
   } catch (err) {
-    console.warn('deleteQuizFromDb error:', err);
+    handleFirestoreError(err, 'deleteQuizFromDb');
   }
 }
 
+// ----------------------------------------------------------------------
 // Books
+// ----------------------------------------------------------------------
 export function subscribeBooks(callback: (items: DigitalBook[]) => void) {
+  localSubscribers['books'].add(callback);
+  const deletedSet = getDeletedIds();
+  const initial = getLocalCache(BOOKS_COL, MOCK_BOOKS).filter(b => !deletedSet.has(b.id));
+  callback(initial);
+
   const q = query(collection(db, BOOKS_COL));
-  return onSnapshot(q, (snapshot) => {
-    const deletedSet = getDeletedIds();
+  const unsub = onSnapshot(q, (snapshot) => {
+    const currentDeleted = getDeletedIds();
     const items: DigitalBook[] = [];
     snapshot.forEach((doc) => {
       const data = doc.data() as DigitalBook;
-      if (!deletedSet.has(data.id)) {
+      if (!currentDeleted.has(data.id)) {
         items.push(data);
       }
     });
     if (items.length > 0) {
+      setLocalCache(BOOKS_COL, items);
       callback(items);
     } else if (snapshot.empty) {
-      callback(MOCK_BOOKS.filter(b => !deletedSet.has(b.id)));
+      callback(MOCK_BOOKS.filter(b => !currentDeleted.has(b.id)));
     } else {
       callback([]);
     }
   }, (err) => {
-    console.warn('Firestore books snapshot notice:', err);
-    const deletedSet = getDeletedIds();
-    callback(MOCK_BOOKS.filter(b => !deletedSet.has(b.id)));
+    handleFirestoreError(err, 'books_subscribe');
+    const currentDeleted = getDeletedIds();
+    callback(getLocalCache(BOOKS_COL, MOCK_BOOKS).filter(b => !currentDeleted.has(b.id)));
   });
+
+  return () => {
+    localSubscribers['books'].delete(callback);
+    unsub();
+  };
 }
 
 export async function addBookToDb(book: DigitalBook) {
   unmarkIdAsDeleted(book.id);
+  const current = getLocalCache<DigitalBook>(BOOKS_COL, MOCK_BOOKS).filter(b => b.id !== book.id);
+  const updated = [book, ...current];
+  setLocalCache(BOOKS_COL, updated);
+  notifyLocalSubscribers('books', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, BOOKS_COL, book.id), cleanData(book));
   } catch (err) {
-    console.warn('addBookToDb error:', err);
+    handleFirestoreError(err, 'addBookToDb');
+  }
+}
+
+export async function updateBookInDb(book: DigitalBook) {
+  unmarkIdAsDeleted(book.id);
+  const current = getLocalCache<DigitalBook>(BOOKS_COL, MOCK_BOOKS);
+  const index = current.findIndex(b => b.id === book.id);
+  let updated: DigitalBook[];
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = { ...updated[index], ...book };
+  } else {
+    updated = [book, ...current];
+  }
+  setLocalCache(BOOKS_COL, updated);
+  notifyLocalSubscribers('books', updated);
+
+  if (isQuotaExceeded) return;
+  try {
+    await setDoc(doc(db, BOOKS_COL, book.id), cleanData(book), { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, 'updateBookInDb');
   }
 }
 
 export async function deleteBookFromDb(id: string) {
   markIdAsDeleted(id);
+  const current = getLocalCache<DigitalBook>(BOOKS_COL, MOCK_BOOKS);
+  const updated = current.filter(b => b.id !== id);
+  setLocalCache(BOOKS_COL, updated);
+  notifyLocalSubscribers('books', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await deleteDoc(doc(db, BOOKS_COL, id));
-    // Clean up associated file chunks if any
     for (let i = 0; i < 60; i++) {
       const chunkId = `${id}_chunk_${i}`;
       deleteDoc(doc(db, 'file_chunks', chunkId)).catch(() => {});
     }
   } catch (err) {
-    console.warn('deleteBookFromDb error:', err);
+    handleFirestoreError(err, 'deleteBookFromDb');
   }
 }
 
+// ----------------------------------------------------------------------
 // Videos
+// ----------------------------------------------------------------------
 export function subscribeVideos(callback: (items: LearningVideo[]) => void) {
+  localSubscribers['videos'].add(callback);
+  const deletedSet = getDeletedIds();
+  const initial = getLocalCache(VIDEOS_COL, MOCK_VIDEOS).filter(v => !deletedSet.has(v.id));
+  callback(initial);
+
   const q = query(collection(db, VIDEOS_COL));
-  return onSnapshot(q, (snapshot) => {
-    const deletedSet = getDeletedIds();
+  const unsub = onSnapshot(q, (snapshot) => {
+    const currentDeleted = getDeletedIds();
     const items: LearningVideo[] = [];
     snapshot.forEach((doc) => {
       const data = doc.data() as LearningVideo;
-      if (!deletedSet.has(data.id)) {
+      if (!currentDeleted.has(data.id)) {
         items.push(data);
       }
     });
     if (items.length > 0) {
+      setLocalCache(VIDEOS_COL, items);
       callback(items);
     } else if (snapshot.empty) {
-      callback(MOCK_VIDEOS.filter(v => !deletedSet.has(v.id)));
+      callback(MOCK_VIDEOS.filter(v => !currentDeleted.has(v.id)));
     } else {
       callback([]);
     }
   }, (err) => {
-    console.warn('Firestore videos snapshot notice:', err);
-    const deletedSet = getDeletedIds();
-    callback(MOCK_VIDEOS.filter(v => !deletedSet.has(v.id)));
+    handleFirestoreError(err, 'videos_subscribe');
+    const currentDeleted = getDeletedIds();
+    callback(getLocalCache(VIDEOS_COL, MOCK_VIDEOS).filter(v => !currentDeleted.has(v.id)));
   });
+
+  return () => {
+    localSubscribers['videos'].delete(callback);
+    unsub();
+  };
 }
 
 export async function addVideoToDb(video: LearningVideo) {
   unmarkIdAsDeleted(video.id);
+  const current = getLocalCache<LearningVideo>(VIDEOS_COL, MOCK_VIDEOS).filter(v => v.id !== video.id);
+  const updated = [video, ...current];
+  setLocalCache(VIDEOS_COL, updated);
+  notifyLocalSubscribers('videos', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, VIDEOS_COL, video.id), cleanData(video));
   } catch (err) {
-    console.warn('addVideoToDb error:', err);
+    handleFirestoreError(err, 'addVideoToDb');
+  }
+}
+
+export async function updateVideoInDb(video: LearningVideo) {
+  unmarkIdAsDeleted(video.id);
+  const current = getLocalCache<LearningVideo>(VIDEOS_COL, MOCK_VIDEOS);
+  const index = current.findIndex(v => v.id === video.id);
+  let updated: LearningVideo[];
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = { ...updated[index], ...video };
+  } else {
+    updated = [video, ...current];
+  }
+  setLocalCache(VIDEOS_COL, updated);
+  notifyLocalSubscribers('videos', updated);
+
+  if (isQuotaExceeded) return;
+  try {
+    await setDoc(doc(db, VIDEOS_COL, video.id), cleanData(video), { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, 'updateVideoInDb');
   }
 }
 
 export async function deleteVideoFromDb(id: string) {
   markIdAsDeleted(id);
+  const current = getLocalCache<LearningVideo>(VIDEOS_COL, MOCK_VIDEOS);
+  const updated = current.filter(v => v.id !== id);
+  setLocalCache(VIDEOS_COL, updated);
+  notifyLocalSubscribers('videos', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await deleteDoc(doc(db, VIDEOS_COL, id));
   } catch (err) {
-    console.warn('deleteVideoFromDb error:', err);
+    handleFirestoreError(err, 'deleteVideoFromDb');
   }
 }
 
+// ----------------------------------------------------------------------
 // Users
+// ----------------------------------------------------------------------
 export function subscribeUsers(callback: (items: UserProfile[]) => void) {
+  localSubscribers['users'].add(callback);
+  const deletedSet = getDeletedIds();
+  const initial = getLocalCache(USERS_COL, MOCK_USERS).filter(u => !deletedSet.has(u.id) && !OLD_DEFAULT_USER_IDS.includes(u.id));
+  callback(initial);
+
   const q = query(collection(db, USERS_COL));
-  return onSnapshot(q, (snapshot) => {
-    const deletedSet = getDeletedIds();
+  const unsub = onSnapshot(q, (snapshot) => {
+    const currentDeleted = getDeletedIds();
     const items: UserProfile[] = [];
     snapshot.forEach((doc) => {
       const data = doc.data() as UserProfile;
-      if (data && data.id && !deletedSet.has(data.id) && !OLD_DEFAULT_USER_IDS.includes(data.id)) {
+      if (data && data.id && !currentDeleted.has(data.id) && !OLD_DEFAULT_USER_IDS.includes(data.id)) {
         items.push({
           ...data,
           role: data.role || 'siswa',
@@ -461,189 +702,363 @@ export function subscribeUsers(callback: (items: UserProfile[]) => void) {
       }
     });
     if (items.length > 0) {
+      setLocalCache(USERS_COL, items);
       callback(items);
     } else if (snapshot.empty) {
-      callback(MOCK_USERS.filter(u => !deletedSet.has(u.id) && !OLD_DEFAULT_USER_IDS.includes(u.id)));
+      callback(MOCK_USERS.filter(u => !currentDeleted.has(u.id) && !OLD_DEFAULT_USER_IDS.includes(u.id)));
     } else {
       callback([]);
     }
   }, (err) => {
-    console.warn('Firestore users snapshot notice:', err);
-    const deletedSet = getDeletedIds();
-    callback(MOCK_USERS.filter(u => !deletedSet.has(u.id) && !OLD_DEFAULT_USER_IDS.includes(u.id)));
+    handleFirestoreError(err, 'users_subscribe');
+    const currentDeleted = getDeletedIds();
+    callback(getLocalCache(USERS_COL, MOCK_USERS).filter(u => !currentDeleted.has(u.id) && !OLD_DEFAULT_USER_IDS.includes(u.id)));
   });
+
+  return () => {
+    localSubscribers['users'].delete(callback);
+    unsub();
+  };
 }
 
 export async function addUserToDb(user: UserProfile) {
   unmarkIdAsDeleted(user.id);
+  const current = getLocalCache<UserProfile>(USERS_COL, MOCK_USERS).filter(u => u.id !== user.id);
+  const updated = [user, ...current];
+  setLocalCache(USERS_COL, updated);
+  notifyLocalSubscribers('users', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, USERS_COL, user.id), cleanData(user));
   } catch (err) {
-    console.warn('addUserToDb error:', err);
+    handleFirestoreError(err, 'addUserToDb');
   }
 }
 
 export async function updateUserInDb(user: UserProfile) {
   unmarkIdAsDeleted(user.id);
+  const current = getLocalCache<UserProfile>(USERS_COL, MOCK_USERS);
+  const index = current.findIndex(u => u.id === user.id);
+  let updated: UserProfile[];
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = { ...updated[index], ...user };
+  } else {
+    updated = [user, ...current];
+  }
+  setLocalCache(USERS_COL, updated);
+  notifyLocalSubscribers('users', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, USERS_COL, user.id), cleanData(user), { merge: true });
   } catch (err) {
-    console.warn('updateUserInDb error:', err);
+    handleFirestoreError(err, 'updateUserInDb');
   }
 }
 
 export async function deleteUserFromDb(id: string) {
   markIdAsDeleted(id);
+  const current = getLocalCache<UserProfile>(USERS_COL, MOCK_USERS);
+  const updated = current.filter(u => u.id !== id);
+  setLocalCache(USERS_COL, updated);
+  notifyLocalSubscribers('users', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await deleteDoc(doc(db, USERS_COL, id));
   } catch (err) {
-    console.warn('deleteUserFromDb error:', err);
+    handleFirestoreError(err, 'deleteUserFromDb');
   }
 }
 
+// ----------------------------------------------------------------------
 // Announcements
+// ----------------------------------------------------------------------
 export function subscribeAnnouncements(callback: (items: SystemAnnouncement[]) => void) {
+  localSubscribers['announcements'].add(callback);
+  const deletedSet = getDeletedIds();
+  const initial = getLocalCache(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS).filter(a => !deletedSet.has(a.id));
+  callback(initial);
+
   const q = query(collection(db, ANNOUNCEMENTS_COL));
-  return onSnapshot(q, (snapshot) => {
-    const deletedSet = getDeletedIds();
+  const unsub = onSnapshot(q, (snapshot) => {
+    const currentDeleted = getDeletedIds();
     const items: SystemAnnouncement[] = [];
     snapshot.forEach((doc) => {
       const data = doc.data() as SystemAnnouncement;
-      if (!deletedSet.has(data.id)) {
+      if (!currentDeleted.has(data.id)) {
         items.push(data);
       }
     });
     if (items.length > 0) {
+      setLocalCache(ANNOUNCEMENTS_COL, items);
       callback(items);
     } else if (snapshot.empty) {
-      callback(MOCK_ANNOUNCEMENTS.filter(a => !deletedSet.has(a.id)));
+      callback(MOCK_ANNOUNCEMENTS.filter(a => !currentDeleted.has(a.id)));
     } else {
       callback([]);
     }
   }, (err) => {
-    console.warn('Firestore announcements snapshot notice:', err);
-    const deletedSet = getDeletedIds();
-    callback(MOCK_ANNOUNCEMENTS.filter(a => !deletedSet.has(a.id)));
+    handleFirestoreError(err, 'announcements_subscribe');
+    const currentDeleted = getDeletedIds();
+    callback(getLocalCache(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS).filter(a => !currentDeleted.has(a.id)));
   });
+
+  return () => {
+    localSubscribers['announcements'].delete(callback);
+    unsub();
+  };
 }
 
 export async function addAnnouncementToDb(announcement: SystemAnnouncement) {
   unmarkIdAsDeleted(announcement.id);
+  const current = getLocalCache<SystemAnnouncement>(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS).filter(a => a.id !== announcement.id);
+  const updated = [announcement, ...current];
+  setLocalCache(ANNOUNCEMENTS_COL, updated);
+  notifyLocalSubscribers('announcements', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, ANNOUNCEMENTS_COL, announcement.id), cleanData(announcement));
   } catch (err) {
-    console.warn('addAnnouncementToDb error:', err);
+    handleFirestoreError(err, 'addAnnouncementToDb');
+  }
+}
+
+export async function updateAnnouncementInDb(announcement: SystemAnnouncement) {
+  unmarkIdAsDeleted(announcement.id);
+  const current = getLocalCache<SystemAnnouncement>(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS);
+  const index = current.findIndex(a => a.id === announcement.id);
+  let updated: SystemAnnouncement[];
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = { ...updated[index], ...announcement };
+  } else {
+    updated = [announcement, ...current];
+  }
+  setLocalCache(ANNOUNCEMENTS_COL, updated);
+  notifyLocalSubscribers('announcements', updated);
+
+  if (isQuotaExceeded) return;
+  try {
+    await setDoc(doc(db, ANNOUNCEMENTS_COL, announcement.id), cleanData(announcement), { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, 'updateAnnouncementInDb');
   }
 }
 
 export async function deleteAnnouncementFromDb(id: string) {
   markIdAsDeleted(id);
+  const current = getLocalCache<SystemAnnouncement>(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS);
+  const updated = current.filter(a => a.id !== id);
+  setLocalCache(ANNOUNCEMENTS_COL, updated);
+  notifyLocalSubscribers('announcements', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await deleteDoc(doc(db, ANNOUNCEMENTS_COL, id));
   } catch (err) {
-    console.warn('deleteAnnouncementFromDb error:', err);
+    handleFirestoreError(err, 'deleteAnnouncementFromDb');
   }
 }
 
+// ----------------------------------------------------------------------
 // Attendance
+// ----------------------------------------------------------------------
 export function subscribeAttendance(callback: (items: AttendanceRecord[]) => void) {
+  localSubscribers['attendance'].add(callback);
+  callback(getLocalCache<AttendanceRecord>(ATTENDANCE_COL, []));
+
   const q = query(collection(db, ATTENDANCE_COL));
-  return onSnapshot(q, (snapshot) => {
+  const unsub = onSnapshot(q, (snapshot) => {
     const items: AttendanceRecord[] = [];
     snapshot.forEach((doc) => {
       items.push(doc.data() as AttendanceRecord);
     });
+    setLocalCache(ATTENDANCE_COL, items);
     callback(items);
   }, (err) => {
-    console.warn('Firestore attendance snapshot notice:', err);
+    handleFirestoreError(err, 'attendance_subscribe');
+    callback(getLocalCache<AttendanceRecord>(ATTENDANCE_COL, []));
   });
+
+  return () => {
+    localSubscribers['attendance'].delete(callback);
+    unsub();
+  };
 }
 
 export async function updateAttendanceInDb(attendance: AttendanceRecord) {
+  const current = getLocalCache<AttendanceRecord>(ATTENDANCE_COL, []);
+  const index = current.findIndex(a => a.id === attendance.id);
+  let updated: AttendanceRecord[];
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = attendance;
+  } else {
+    updated = [attendance, ...current];
+  }
+  setLocalCache(ATTENDANCE_COL, updated);
+  notifyLocalSubscribers('attendance', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, ATTENDANCE_COL, attendance.id), cleanData(attendance));
   } catch (err) {
-    console.warn('updateAttendanceInDb error:', err);
+    handleFirestoreError(err, 'updateAttendanceInDb');
   }
 }
 
+// ----------------------------------------------------------------------
 // Schedules
+// ----------------------------------------------------------------------
 export function subscribeSchedules(callback: (items: ClassSchedule[]) => void) {
+  localSubscribers['schedules'].add(callback);
+  const deletedSet = getDeletedIds();
+  const initial = getLocalCache(SCHEDULES_COL, MOCK_SCHEDULES).filter(s => !deletedSet.has(s.id));
+  callback(initial);
+
   const q = query(collection(db, SCHEDULES_COL));
-  return onSnapshot(q, (snapshot) => {
-    const deletedSet = getDeletedIds();
+  const unsub = onSnapshot(q, (snapshot) => {
+    const currentDeleted = getDeletedIds();
     const items: ClassSchedule[] = [];
     snapshot.forEach((doc) => {
       const data = doc.data() as ClassSchedule;
-      if (!deletedSet.has(data.id)) {
+      if (!currentDeleted.has(data.id)) {
         items.push(data);
       }
     });
     if (items.length > 0) {
+      setLocalCache(SCHEDULES_COL, items);
       callback(items);
     } else if (snapshot.empty) {
-      callback(MOCK_SCHEDULES.filter(s => !deletedSet.has(s.id)));
+      callback(MOCK_SCHEDULES.filter(s => !currentDeleted.has(s.id)));
     } else {
       callback([]);
     }
   }, (err) => {
-    console.warn('Firestore schedules snapshot notice:', err);
-    const deletedSet = getDeletedIds();
-    callback(MOCK_SCHEDULES.filter(s => !deletedSet.has(s.id)));
+    handleFirestoreError(err, 'schedules_subscribe');
+    const currentDeleted = getDeletedIds();
+    callback(getLocalCache(SCHEDULES_COL, MOCK_SCHEDULES).filter(s => !currentDeleted.has(s.id)));
   });
+
+  return () => {
+    localSubscribers['schedules'].delete(callback);
+    unsub();
+  };
 }
 
 export async function addScheduleToDb(schedule: ClassSchedule) {
   unmarkIdAsDeleted(schedule.id);
+  const current = getLocalCache<ClassSchedule>(SCHEDULES_COL, MOCK_SCHEDULES).filter(s => s.id !== schedule.id);
+  const updated = [schedule, ...current];
+  setLocalCache(SCHEDULES_COL, updated);
+  notifyLocalSubscribers('schedules', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, SCHEDULES_COL, schedule.id), cleanData(schedule));
   } catch (err) {
-    console.warn('addScheduleToDb error:', err);
+    handleFirestoreError(err, 'addScheduleToDb');
   }
 }
 
 export async function updateScheduleInDb(schedule: ClassSchedule) {
   unmarkIdAsDeleted(schedule.id);
+  const current = getLocalCache<ClassSchedule>(SCHEDULES_COL, MOCK_SCHEDULES);
+  const index = current.findIndex(s => s.id === schedule.id);
+  let updated: ClassSchedule[];
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = { ...updated[index], ...schedule };
+  } else {
+    updated = [schedule, ...current];
+  }
+  setLocalCache(SCHEDULES_COL, updated);
+  notifyLocalSubscribers('schedules', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, SCHEDULES_COL, schedule.id), cleanData(schedule), { merge: true });
   } catch (err) {
-    console.warn('updateScheduleInDb error:', err);
+    handleFirestoreError(err, 'updateScheduleInDb');
   }
 }
 
 export async function deleteScheduleFromDb(id: string) {
   markIdAsDeleted(id);
+  const current = getLocalCache<ClassSchedule>(SCHEDULES_COL, MOCK_SCHEDULES);
+  const updated = current.filter(s => s.id !== id);
+  setLocalCache(SCHEDULES_COL, updated);
+  notifyLocalSubscribers('schedules', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await deleteDoc(doc(db, SCHEDULES_COL, id));
   } catch (err) {
-    console.warn('deleteScheduleFromDb error:', err);
+    handleFirestoreError(err, 'deleteScheduleFromDb');
   }
 }
 
+// ----------------------------------------------------------------------
 // Submissions
+// ----------------------------------------------------------------------
 export function subscribeSubmissions(callback: (items: StudentQuizSubmission[]) => void) {
+  localSubscribers['submissions'].add(callback);
+  callback(getLocalCache<StudentQuizSubmission>(SUBMISSIONS_COL, []));
+
   const q = query(collection(db, SUBMISSIONS_COL));
-  return onSnapshot(q, (snapshot) => {
+  const unsub = onSnapshot(q, (snapshot) => {
     const items: StudentQuizSubmission[] = [];
     snapshot.forEach((doc) => {
       items.push(doc.data() as StudentQuizSubmission);
     });
+    setLocalCache(SUBMISSIONS_COL, items);
     callback(items);
   }, (err) => {
-    console.warn('Firestore submissions snapshot error:', err);
-    callback([]);
+    handleFirestoreError(err, 'submissions_subscribe');
+    callback(getLocalCache<StudentQuizSubmission>(SUBMISSIONS_COL, []));
   });
+
+  return () => {
+    localSubscribers['submissions'].delete(callback);
+    unsub();
+  };
 }
 
 export async function addSubmissionToDb(submission: StudentQuizSubmission) {
+  const current = getLocalCache<StudentQuizSubmission>(SUBMISSIONS_COL, []);
+  const updated = [submission, ...current.filter(s => s.id !== submission.id)];
+  setLocalCache(SUBMISSIONS_COL, updated);
+  notifyLocalSubscribers('submissions', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, SUBMISSIONS_COL, submission.id), cleanData(submission));
   } catch (err) {
-    console.warn('addSubmissionToDb error:', err);
+    handleFirestoreError(err, 'addSubmissionToDb');
   }
 }
 
+export async function deleteSubmissionFromDb(id: string) {
+  const current = getLocalCache<StudentQuizSubmission>(SUBMISSIONS_COL, []);
+  const updated = current.filter(s => s.id !== id);
+  setLocalCache(SUBMISSIONS_COL, updated);
+  notifyLocalSubscribers('submissions', updated);
+
+  if (isQuotaExceeded) return;
+  try {
+    await deleteDoc(doc(db, SUBMISSIONS_COL, id));
+  } catch (err) {
+    handleFirestoreError(err, 'deleteSubmissionFromDb');
+  }
+}
+
+// ----------------------------------------------------------------------
 // Student Learning Progress Functions
+// ----------------------------------------------------------------------
 export function getLocalStudentProgress(studentId: string): Record<string, ContentLearningProgress> {
   try {
     const raw = localStorage.getItem(`edusmart_student_progress_${studentId}`);
@@ -688,10 +1103,13 @@ export function subscribeStudentProgress(
       callback(local);
     }
   }, (err) => {
-    console.warn('Firestore student progress snapshot error:', err);
+    handleFirestoreError(err, 'student_progress_subscribe');
     callback(getLocalStudentProgress(studentId));
   });
 }
+
+// Debounce timer map for Firestore progress writes
+const progressDebounceTimers: Record<string, any> = {};
 
 export async function updateStudentContentProgress(
   studentId: string,
@@ -710,7 +1128,7 @@ export async function updateStudentContentProgress(
   };
   saveLocalStudentProgress(studentId, updatedLocal);
 
-  // If this is a material, also keep studied materials array in sync for backward compatibility
+  // Sync studied materials list locally
   if (progressItem.contentType === 'material') {
     try {
       const studiedList: string[] = JSON.parse(localStorage.getItem('edusmart_studied_materials') || '[]');
@@ -722,19 +1140,30 @@ export async function updateStudentContentProgress(
     } catch {}
   }
 
-  try {
-    await setDoc(doc(db, STUDENT_PROGRESS_COL, studentId), {
-      studentId,
-      progressItems: updatedLocal,
-      lastUpdated: new Date().toISOString()
-    }, { merge: true });
-  } catch (err) {
-    console.warn('Firestore updateStudentContentProgress error:', err);
+  // Debounced cloud sync to save Firestore write units
+  if (isQuotaExceeded) return;
+
+  if (progressDebounceTimers[studentId]) {
+    clearTimeout(progressDebounceTimers[studentId]);
   }
+
+  progressDebounceTimers[studentId] = setTimeout(async () => {
+    if (isQuotaExceeded) return;
+    try {
+      await setDoc(doc(db, STUDENT_PROGRESS_COL, studentId), {
+        studentId,
+        progressItems: updatedLocal,
+        lastUpdated: new Date().toISOString()
+      }, { merge: true });
+    } catch (err) {
+      handleFirestoreError(err, 'updateStudentContentProgress');
+    }
+  }, 2500);
 }
 
-
+// ----------------------------------------------------------------------
 // School Branding & System Settings
+// ----------------------------------------------------------------------
 export function getLocalSchoolSettings(): SchoolSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_LOCAL_KEY);
@@ -749,24 +1178,23 @@ export function saveLocalSchoolSettings(settings: SchoolSettings) {
   try {
     localStorage.setItem(SETTINGS_LOCAL_KEY, JSON.stringify(settings));
   } catch (e) {
-    console.warn('Failed to save local settings (quota exceeded), trying lightweight config:', e);
     try {
-      // Create a lightweight copy without the heavy Base64 image data for localStorage fallback
       const lightweight: SchoolSettings = {
         ...settings,
         logoUrl: settings.logoUrl?.startsWith('data:') ? '' : settings.logoUrl,
         loginBgUrl: settings.loginBgUrl?.startsWith('data:') ? '' : settings.loginBgUrl
       };
       localStorage.setItem(SETTINGS_LOCAL_KEY, JSON.stringify(lightweight));
-    } catch (fallbackErr) {
-      console.error('Completely failed to save school settings to localStorage:', fallbackErr);
-    }
+    } catch {}
   }
 }
 
 export function subscribeSchoolSettings(callback: (settings: SchoolSettings) => void) {
+  localSubscribers['settings'].add(callback);
+  callback(getLocalSchoolSettings());
+
   const docRef = doc(db, SETTINGS_COL, 'school_settings');
-  return onSnapshot(docRef, (snapshot) => {
+  const unsub = onSnapshot(docRef, (snapshot) => {
     if (snapshot.exists()) {
       const data = snapshot.data() as SchoolSettings;
       const merged = { ...DEFAULT_SCHOOL_SETTINGS, ...data };
@@ -777,9 +1205,14 @@ export function subscribeSchoolSettings(callback: (settings: SchoolSettings) => 
       callback(current);
     }
   }, (err) => {
-    console.warn('Firestore school_settings snapshot error:', err);
+    handleFirestoreError(err, 'school_settings_subscribe');
     callback(getLocalSchoolSettings());
   });
+
+  return () => {
+    localSubscribers['settings'].delete(callback);
+    unsub();
+  };
 }
 
 export async function updateSchoolSettingsInDb(newSettings: Partial<SchoolSettings>) {
@@ -790,106 +1223,33 @@ export async function updateSchoolSettingsInDb(newSettings: Partial<SchoolSettin
     updatedAt: new Date().toISOString()
   };
   saveLocalSchoolSettings(updated);
+  notifyLocalSubscribers('settings', updated);
+
+  if (isQuotaExceeded) return;
   try {
     await setDoc(doc(db, SETTINGS_COL, 'school_settings'), cleanData(updated), { merge: true });
   } catch (err) {
-    console.warn('updateSchoolSettingsInDb error:', err);
+    handleFirestoreError(err, 'updateSchoolSettingsInDb');
   }
 }
 
-export async function updateBookInDb(book: DigitalBook) {
-  unmarkIdAsDeleted(book.id);
-  try {
-    await setDoc(doc(db, BOOKS_COL, book.id), cleanData(book), { merge: true });
-  } catch (err) {
-    console.warn('updateBookInDb error:', err);
-  }
-}
-
-export async function updateMaterialInDb(material: LearningMaterial) {
-  unmarkIdAsDeleted(material.id);
-  try {
-    await setDoc(doc(db, MATERIALS_COL, material.id), cleanData(material), { merge: true });
-  } catch (err) {
-    console.warn('updateMaterialInDb error:', err);
-  }
-}
-
-export async function updateQuizInDb(quiz: QuizExam) {
-  unmarkIdAsDeleted(quiz.id);
-  try {
-    await setDoc(doc(db, QUIZZES_COL, quiz.id), cleanData(quiz), { merge: true });
-  } catch (err) {
-    console.warn('updateQuizInDb error:', err);
-  }
-}
-
-export async function updateVideoInDb(video: LearningVideo) {
-  unmarkIdAsDeleted(video.id);
-  try {
-    await setDoc(doc(db, VIDEOS_COL, video.id), cleanData(video), { merge: true });
-  } catch (err) {
-    console.warn('updateVideoInDb error:', err);
-  }
-}
-
-export async function updateAnnouncementInDb(announcement: SystemAnnouncement) {
-  unmarkIdAsDeleted(announcement.id);
-  try {
-    await setDoc(doc(db, ANNOUNCEMENTS_COL, announcement.id), cleanData(announcement), { merge: true });
-  } catch (err) {
-    console.warn('updateAnnouncementInDb error:', err);
-  }
-}
-
-export async function deleteSubmissionFromDb(id: string) {
-  try {
-    await deleteDoc(doc(db, SUBMISSIONS_COL, id));
-  } catch (err) {
-    console.warn('deleteSubmissionFromDb error:', err);
-  }
-}
-
-// Complete Full-Database Backup (Exports all collections into a structured JSON)
+// ----------------------------------------------------------------------
+// Full Database Backup & Restore & Stats
+// ----------------------------------------------------------------------
 export async function getFullDatabaseBackup(): Promise<Record<string, any>> {
   const backupData: Record<string, any[]> = {
-    users: [],
-    materials: [],
-    quizzes: [],
-    books: [],
-    videos: [],
-    announcements: [],
-    schedules: [],
-    attendance: [],
-    quiz_submissions: [],
-    settings: [],
+    users: getLocalCache(USERS_COL, MOCK_USERS),
+    materials: getLocalCache(MATERIALS_COL, MOCK_MATERIALS),
+    quizzes: getLocalCache(QUIZZES_COL, MOCK_QUIZZES),
+    books: getLocalCache(BOOKS_COL, MOCK_BOOKS),
+    videos: getLocalCache(VIDEOS_COL, MOCK_VIDEOS),
+    announcements: getLocalCache(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS),
+    schedules: getLocalCache(SCHEDULES_COL, MOCK_SCHEDULES),
+    attendance: getLocalCache(ATTENDANCE_COL, []),
+    quiz_submissions: getLocalCache(SUBMISSIONS_COL, []),
+    settings: [getLocalSchoolSettings()],
     student_progress: []
   };
-
-  const collectionsList = [
-    { key: 'users', col: USERS_COL },
-    { key: 'materials', col: MATERIALS_COL },
-    { key: 'quizzes', col: QUIZZES_COL },
-    { key: 'books', col: BOOKS_COL },
-    { key: 'videos', col: VIDEOS_COL },
-    { key: 'announcements', col: ANNOUNCEMENTS_COL },
-    { key: 'schedules', col: SCHEDULES_COL },
-    { key: 'attendance', col: ATTENDANCE_COL },
-    { key: 'quiz_submissions', col: SUBMISSIONS_COL },
-    { key: 'settings', col: SETTINGS_COL },
-    { key: 'student_progress', col: STUDENT_PROGRESS_COL },
-  ];
-
-  for (const item of collectionsList) {
-    try {
-      const snap = await getDocs(collection(db, item.col));
-      snap.forEach((docItem) => {
-        backupData[item.key].push(docItem.data());
-      });
-    } catch (err) {
-      console.warn(`Backup read error for ${item.key}:`, err);
-    }
-  }
 
   return {
     exportedAt: new Date().toISOString(),
@@ -899,7 +1259,6 @@ export async function getFullDatabaseBackup(): Promise<Record<string, any>> {
   };
 }
 
-// Full-Database Restore (Takes a JSON backup and restores all documents to Firestore)
 export async function restoreFullDatabaseBackup(backupPayload: any): Promise<{ success: boolean; totalRestored: number; message: string }> {
   try {
     const rawData = backupPayload?.data || backupPayload;
@@ -922,11 +1281,19 @@ export async function restoreFullDatabaseBackup(backupPayload: any): Promise<{ s
     for (const [key, colName] of Object.entries(collectionsMapping)) {
       const items = rawData[key];
       if (Array.isArray(items)) {
+        setLocalCache(colName, items);
+        notifyLocalSubscribers(key, items);
         for (const item of items) {
           const docId = item.id || (key === 'settings' ? 'school_settings' : undefined);
           if (docId) {
             unmarkIdAsDeleted(docId);
-            await setDoc(doc(db, colName, docId), cleanData(item), { merge: true });
+            if (!isQuotaExceeded) {
+              try {
+                await setDoc(doc(db, colName, docId), cleanData(item), { merge: true });
+              } catch (err) {
+                handleFirestoreError(err, 'restore');
+              }
+            }
             totalRestored++;
           }
         }
@@ -936,7 +1303,7 @@ export async function restoreFullDatabaseBackup(backupPayload: any): Promise<{ s
     return {
       success: true,
       totalRestored,
-      message: `Berhasil memulihkan ${totalRestored} data ke Firestore Database.`
+      message: `Berhasil memulihkan ${totalRestored} data ke database LMS.`
     };
   } catch (err: any) {
     console.error('Restore error:', err);
@@ -948,103 +1315,79 @@ export async function restoreFullDatabaseBackup(backupPayload: any): Promise<{ s
   }
 }
 
-// Get Realtime Statistics of all collections from Firestore
 export async function getDatabaseStats(): Promise<Record<string, number>> {
-  const stats: Record<string, number> = {
-    users: 0,
-    materials: 0,
-    quizzes: 0,
-    books: 0,
-    videos: 0,
-    announcements: 0,
-    schedules: 0,
-    attendance: 0,
-    submissions: 0
+  return {
+    users: getLocalCache(USERS_COL, MOCK_USERS).length,
+    materials: getLocalCache(MATERIALS_COL, MOCK_MATERIALS).length,
+    quizzes: getLocalCache(QUIZZES_COL, MOCK_QUIZZES).length,
+    books: getLocalCache(BOOKS_COL, MOCK_BOOKS).length,
+    videos: getLocalCache(VIDEOS_COL, MOCK_VIDEOS).length,
+    announcements: getLocalCache(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS).length,
+    schedules: getLocalCache(SCHEDULES_COL, MOCK_SCHEDULES).length,
+    attendance: getLocalCache(ATTENDANCE_COL, []).length,
+    submissions: getLocalCache(SUBMISSIONS_COL, []).length
   };
-
-  const mapList = [
-    { key: 'users', col: USERS_COL },
-    { key: 'materials', col: MATERIALS_COL },
-    { key: 'quizzes', col: QUIZZES_COL },
-    { key: 'books', col: BOOKS_COL },
-    { key: 'videos', col: VIDEOS_COL },
-    { key: 'announcements', col: ANNOUNCEMENTS_COL },
-    { key: 'schedules', col: SCHEDULES_COL },
-    { key: 'attendance', col: ATTENDANCE_COL },
-    { key: 'submissions', col: SUBMISSIONS_COL },
-  ];
-
-  for (const item of mapList) {
-    try {
-      const snap = await getDocs(collection(db, item.col));
-      stats[item.key] = snap.size;
-    } catch {
-      stats[item.key] = 0;
-    }
-  }
-
-  return stats;
 }
 
-// Force Sync all mock data into Firestore ensuring 100% persistent storage on new deploy
 export async function forceSyncAllToCloud(): Promise<number> {
+  if (isQuotaExceeded) {
+    return 0;
+  }
   let count = 0;
   try {
-    for (const item of MOCK_USERS) {
+    for (const item of getLocalCache(USERS_COL, MOCK_USERS)) {
       if (!OLD_DEFAULT_USER_IDS.includes(item.id)) {
         await setDoc(doc(db, USERS_COL, item.id), cleanData(item), { merge: true });
         count++;
       }
     }
-    for (const item of MOCK_MATERIALS) {
+    for (const item of getLocalCache(MATERIALS_COL, MOCK_MATERIALS)) {
       await setDoc(doc(db, MATERIALS_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
-    for (const item of MOCK_QUIZZES) {
+    for (const item of getLocalCache(QUIZZES_COL, MOCK_QUIZZES)) {
       await setDoc(doc(db, QUIZZES_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
-    for (const item of MOCK_BOOKS) {
+    for (const item of getLocalCache(BOOKS_COL, MOCK_BOOKS)) {
       await setDoc(doc(db, BOOKS_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
-    for (const item of MOCK_VIDEOS) {
+    for (const item of getLocalCache(VIDEOS_COL, MOCK_VIDEOS)) {
       await setDoc(doc(db, VIDEOS_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
-    for (const item of MOCK_ANNOUNCEMENTS) {
+    for (const item of getLocalCache(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS)) {
       await setDoc(doc(db, ANNOUNCEMENTS_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
-    for (const item of MOCK_SCHEDULES) {
+    for (const item of getLocalCache(SCHEDULES_COL, MOCK_SCHEDULES)) {
       await setDoc(doc(db, SCHEDULES_COL, item.id), cleanData(item), { merge: true });
       count++;
     }
-    const currentSettings = getLocalSchoolSettings();
-    await setDoc(doc(db, SETTINGS_COL, 'school_settings'), cleanData(currentSettings), { merge: true });
-    count++;
   } catch (err) {
-    console.error('Error force syncing to cloud:', err);
+    handleFirestoreError(err, 'forceSyncAllToCloud');
   }
   return count;
 }
 
-
-
-
-
-
 export async function uploadLargeFileToFirestore(fileId: string, b64Data: string): Promise<number> {
+  if (isQuotaExceeded) return 0;
   const CHUNK_SIZE = 900000;
   const chunks = Math.ceil(b64Data.length / CHUNK_SIZE);
   for (let i = 0; i < chunks; i++) {
     const chunkId = `${fileId}_chunk_${i}`;
     const chunkData = b64Data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-    await setDoc(doc(db, 'file_chunks', chunkId), {
-       fileId,
-       index: i,
-       data: chunkData
-    });
+    try {
+      await setDoc(doc(db, 'file_chunks', chunkId), {
+        fileId,
+        index: i,
+        data: chunkData
+      });
+    } catch (err) {
+      handleFirestoreError(err, 'uploadLargeFile');
+      break;
+    }
   }
   return chunks;
 }
@@ -1053,9 +1396,13 @@ export async function downloadLargeFileFromFirestore(fileId: string, chunks: num
   let fullB64 = '';
   for (let i = 0; i < chunks; i++) {
     const chunkId = `${fileId}_chunk_${i}`;
-    const snap = await getDoc(doc(db, 'file_chunks', chunkId));
-    if (snap.exists()) {
-      fullB64 += snap.data().data;
+    try {
+      const snap = await getDoc(doc(db, 'file_chunks', chunkId));
+      if (snap.exists()) {
+        fullB64 += snap.data().data;
+      }
+    } catch (err) {
+      handleFirestoreError(err, 'downloadLargeFile');
     }
   }
   return fullB64;
@@ -1071,6 +1418,7 @@ export async function forcePurgeMockContent() {
     schedules: ['sch-1', 'sch-2', 'sch-3', 'sch-4', 'sch-5', 'sch-6']
   };
 
+  if (isQuotaExceeded) return;
   try {
     for (const id of mockIds.materials) await deleteDoc(doc(db, MATERIALS_COL, id));
     for (const id of mockIds.books) await deleteDoc(doc(db, BOOKS_COL, id));
@@ -1078,8 +1426,7 @@ export async function forcePurgeMockContent() {
     for (const id of mockIds.quizzes) await deleteDoc(doc(db, QUIZZES_COL, id));
     for (const id of mockIds.announcements) await deleteDoc(doc(db, ANNOUNCEMENTS_COL, id));
     for (const id of mockIds.schedules) await deleteDoc(doc(db, SCHEDULES_COL, id));
-    console.log('Mock content purged successfully');
   } catch (err) {
-    console.warn('Error purging mock content:', err);
+    handleFirestoreError(err, 'forcePurgeMockContent');
   }
 }

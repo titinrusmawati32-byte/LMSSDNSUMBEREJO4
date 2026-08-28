@@ -1,0 +1,57 @@
+--- src/components/BookReaderModal.tsx
++++ src/components/BookReaderModal.tsx
+@@ -11,6 +11,7 @@
+ import { DigitalBook, LearningMaterial } from '../types';
+ import { downloadLargeFileFromFirestore } from "../lib/lmsDb";
+ import { getPdfBlob, getPdfArrayBuffer, getPdfBlobUrl } from '../lib/pdfStorage';
++import { resolvePdfSource, ParsedPdfSource } from '../lib/pdfHelper';
+ 
+ interface ChapterItem {
+   title: string;
+@@ -49,6 +50,7 @@
+   onProgressUpdate
+ }) => {
+   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
++  const [externalSource, setExternalSource] = useState<ParsedPdfSource | null>(null);
+   const [numPages, setNumPages] = useState<number>(0);
+   const [currentPage, setCurrentPage] = useState<number>(1);
+   const [pageInputVal, setPageInputVal] = useState<string>('1');
+@@ -348,6 +350,15 @@
+         }
+ 
+         if (!pdfData) {
++          const parsedSource = resolvePdfSource(book.fileUrl || book.fileUrl, book.fileData);
++          if (parsedSource.type !== 'fallback' && parsedSource.embedUrl) {
++             setExternalSource(parsedSource);
++             setIsLoading(false);
++             setPdfDoc(null);
++             setNumPages(1); // Usually we don't know total pages for iframe
++             return;
++          }
++
+           // No binary PDF found, this is a simulated starter book
+           if (!isCancelled) {
+             const total = book.totalPages || 10;
+@@ -1041,6 +1052,22 @@
+                   </button>
+                 )}
+               </div>
++            ) : externalSource ? (
++              <div className="flex flex-col items-center w-full h-[85vh] py-2">
++                <div className="w-full h-full max-w-5xl bg-white rounded-xl overflow-hidden shadow-2xl border border-slate-200">
++                  <iframe 
++                    src={externalSource.embedUrl} 
++                    className="w-full h-full border-0"
++                    title="PDF Reader Viewer"
++                    allow="autoplay"
++                  ></iframe>
++                </div>
++                <div className="mt-4 flex flex-wrap justify-center gap-3">
++                  <a href={externalSource.downloadUrl} target="_blank" rel="noreferrer" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-2">
++                     <ExternalLink className="w-4 h-4" /> Buka di Tab Baru
++                  </a>
++                </div>
++              </div>
+             ) : pdfDoc ? (
+               /* High-DPI Canvas Rendering Engine with Generous pb-48 Bottom Scroll Margin */
+               <div className="flex flex-col items-center py-2 pb-48 min-h-full w-full">

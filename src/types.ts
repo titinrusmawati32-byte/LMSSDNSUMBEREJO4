@@ -67,6 +67,10 @@ export interface LearningMaterial {
   fileName?: string;
   fileUrl?: string;
   fileData?: string; // base64 or blob URL
+  targetClass?: string;
+  linkedQuizId?: string;
+  instruction?: string;
+  storageType?: 'file' | 'url' | 'gdrive';
 }
 
 export interface QuizQuestion {
@@ -108,6 +112,9 @@ export interface DigitalBook {
   fileUrl?: string;
   fileData?: string; // base64 or blob URL for uploaded PDF
   targetPage?: number;
+  targetClass?: string;
+  teacherInstruction?: string;
+  storageType?: 'file' | 'url' | 'gdrive';
   uploadDate?: string;
 }
 

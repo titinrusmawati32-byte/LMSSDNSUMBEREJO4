@@ -174,6 +174,8 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
   };
 
   // Form State - Bahan Ajar (PDF)
+  const [matStorageType, setMatStorageType] = useState<'file' | 'url' | 'gdrive'>('file');
+  const [matCloudUrl, setMatCloudUrl] = useState('');
   const [matTitle, setMatTitle] = useState('');
   const [matSubject, setMatSubject] = useState(defaultInitialSubject);
   const [matFileType, setMatFileType] = useState<'PDF' | 'PPT' | 'DOCX' | 'ZIP'>('PDF');
@@ -204,6 +206,8 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
   const [correctIdx, setCorrectIdx] = useState(0);
 
   // Form State - Buku Digital (PDF)
+  const [bookStorageType, setBookStorageType] = useState<'file' | 'url' | 'gdrive'>('file');
+  const [bookCloudUrl, setBookCloudUrl] = useState('');
   const [bookTitle, setBookTitle] = useState('');
   const [bookAuthor, setBookAuthor] = useState(currentUser.name);
   const [bookSubject, setBookSubject] = useState(defaultInitialSubject);
@@ -336,7 +340,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
     let fileUrlStr: string | undefined = undefined;
 
     try {
-      if (matPdfFile) {
+      if (matStorageType === 'file' && matPdfFile) {
         await savePdfBlob(newId, matPdfFile, matPdfName || (cleanTitle + '.pdf'));
         fileUrlStr = `/uploads/${newId}.pdf`;
         const b64 = await convertFileToBase64(matPdfFile);
@@ -359,10 +363,22 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
         }).catch(err => console.warn('Background server upload note:', err));
       }
 
+      if (matStorageType === 'url' || matStorageType === 'gdrive') {
+        fileUrlStr = matCloudUrl;
+      }
+      
+      let finalStorageType: 'file' | 'url' | 'gdrive' = 'file';
+      if (matStorageType === 'gdrive') finalStorageType = 'gdrive';
+      if (matStorageType === 'url') finalStorageType = 'url';
+
       const newMat: LearningMaterial = {
         id: newId,
         title: cleanTitle,
         subject: matSubject,
+        storageType: finalStorageType,
+        targetClass: 'Semua Kelas',
+        linkedQuizId: '',
+        instruction: (matDesc || '').trim(),
         fileType: matFileType,
         fileSize: matFileSize || (matPdfFile ? `${(matPdfFile.size / (1024 * 1024)).toFixed(1)} MB` : '2.5 MB'),
         fileChunks: calculatedChunks,
@@ -378,6 +394,8 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
       onAddMaterial(newMat);
       setShowMaterialModal(false);
       setMatTitle('');
+      setMatCloudUrl('');
+      setMatStorageType('file');
       setMatDesc('');
       setMatPdfName('');
       setMatFileSize('');
@@ -408,7 +426,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
       let fileUrlStr: string | undefined = undefined;
       let detectedPages: number = 10;
 
-      if (bookPdfFile) {
+      if (bookStorageType === 'file' && bookPdfFile) {
         // 1. Instantly save raw File Blob into browser IndexedDB (handles 100+ MBs instantaneously)
         await savePdfBlob(bookId, bookPdfFile, bookPdfName || (cleanTitle + '.pdf'));
         fileUrlStr = `/uploads/${bookId}.pdf`;
@@ -434,16 +452,25 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
         }).catch(err => console.warn('Background server upload note:', err));
       }
 
+      if (bookStorageType === 'url' || bookStorageType === 'gdrive') {
+        fileUrlStr = bookCloudUrl;
+      }
+
       const parsedTargetPage = targetPage ? parseInt(targetPage, 10) : undefined;
       const validTargetPage = (parsedTargetPage && !isNaN(parsedTargetPage) && parsedTargetPage > 0)
         ? parsedTargetPage
         : undefined;
+
+      let finalStorageType: 'file' | 'url' | 'gdrive' = 'file';
+      if (bookStorageType === 'gdrive') finalStorageType = 'gdrive';
+      if (bookStorageType === 'url') finalStorageType = 'url';
 
       const newBk: DigitalBook = {
         id: bookId,
         title: cleanTitle,
         author: (bookAuthor || '').trim() || currentUser.name,
         subject: bookSubject || 'Tematik / Umum',
+        storageType: finalStorageType,
         totalPages: detectedPages,
         coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&q=80&w=400',
         description: (bookDesc || '').trim() || 'E-Book PDF modul acuan pembelajaran siswa.',
@@ -454,13 +481,16 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
         fileName: bookPdfName || (cleanTitle + '.pdf'),
         fileUrl: fileUrlStr,
         fileData: fileDataStr,
-        targetPage: validTargetPage,
+        targetPage: validTargetPage || 1,
+        teacherInstruction: bookDesc,
         uploadDate: 'Hari ini'
       };
 
       onAddBook(newBk);
       setShowBookModal(false);
       setBookTitle('');
+      setBookCloudUrl('');
+      setBookStorageType('file');
       setBookAuthor('');
       setBookDesc('');
       setBookPdfName('');
@@ -1580,37 +1610,62 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
             </div>
 
             <form onSubmit={handleAddBookSubmit} className="flex-1 overflow-y-auto custom-scrollbar smooth-scroll pr-1.5 space-y-4">
-              {/* Dropzone File PDF */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Unggah Berkas PDF Buku Digital
-                </label>
-                <label className="border-2 border-dashed border-slate-700/80 hover:border-indigo-500/60 rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer bg-slate-950/40 transition group">
-                  <input 
-                    type="file" 
-                    accept=".pdf" 
-                    onChange={handleBookPdfChange} 
-                    className="hidden" 
-                  />
-                  {bookPdfFile ? (
-                    <div className="text-center space-y-1">
-                      <div className="w-10 h-10 rounded-xl bg-indigo-950/80 text-indigo-400 flex items-center justify-center mx-auto border border-indigo-700/50">
-                        <FileText className="w-5 h-5" />
-                      </div>
-                      <p className="text-xs font-bold text-white truncate max-w-xs">{bookPdfName}</p>
-                      <span className="text-[10px] text-emerald-400 font-medium bg-emerald-950/60 px-2 py-0.5 rounded">
-                        Ukuran: {bookPdfSize}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="text-center space-y-1">
-                      <UploadCloud className="w-8 h-8 text-slate-500 group-hover:text-indigo-400 mx-auto transition" />
-                      <p className="text-xs font-semibold text-slate-300">Klik atau seret file PDF buku ke sini</p>
-                      <p className="text-[10px] text-slate-500">Mendukung file PDF kurikulum hingga puluhan Megabyte</p>
-                    </div>
-                  )}
-                </label>
+              {/* Dropzone File PDF or Link Input */}
+              <div className="flex bg-slate-950/60 p-1 rounded-xl mb-3">
+                <button type="button" onClick={() => setBookStorageType('file')} className={`flex-1 text-[11px] font-semibold py-2 rounded-lg transition ${bookStorageType === 'file' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>File Upload (Max 1MB)</button>
+                <button type="button" onClick={() => setBookStorageType('gdrive')} className={`flex-1 text-[11px] font-semibold py-2 rounded-lg transition ${bookStorageType === 'gdrive' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>Google Drive Link</button>
+                <button type="button" onClick={() => setBookStorageType('url')} className={`flex-1 text-[11px] font-semibold py-2 rounded-lg transition ${bookStorageType === 'url' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>Direct URL</button>
               </div>
+
+              {bookStorageType !== 'file' ? (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    URL / Link {bookStorageType === 'gdrive' ? 'Google Drive' : 'File (Publik)'}
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    placeholder={bookStorageType === 'gdrive' ? "https://drive.google.com/file/d/..." : "https://contoh.com/file.pdf"}
+                    value={bookCloudUrl}
+                    onChange={e => setBookCloudUrl(e.target.value)}
+                    className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                  {bookStorageType === 'gdrive' && (
+                    <p className="text-[10px] text-slate-400 mt-1.5">Pastikan akses link Google Drive diatur ke <strong>"Siapa saja yang memiliki link"</strong> (Viewer).</p>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Unggah Berkas PDF Buku Digital
+                  </label>
+                  <label className="border-2 border-dashed border-slate-700/80 hover:border-indigo-500/60 rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer bg-slate-950/40 transition group">
+                    <input 
+                      type="file" 
+                      accept=".pdf" 
+                      onChange={handleBookPdfChange} 
+                      className="hidden" 
+                    />
+                    {bookPdfFile ? (
+                      <div className="text-center space-y-1">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-950/80 text-indigo-400 flex items-center justify-center mx-auto border border-indigo-700/50">
+                          <FileText className="w-5 h-5" />
+                        </div>
+                        <p className="text-xs font-bold text-white truncate max-w-xs">{bookPdfName}</p>
+                        <span className="text-[10px] text-emerald-400 font-medium bg-emerald-950/60 px-2 py-0.5 rounded">
+                          Ukuran: {bookPdfSize}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-center space-y-1">
+                        <UploadCloud className="w-8 h-8 text-slate-500 group-hover:text-indigo-400 mx-auto transition" />
+                        <p className="text-xs font-semibold text-slate-300">Klik atau seret file PDF buku ke sini</p>
+                        <p className="text-[10px] text-slate-500">Mendukung file PDF kurikulum hingga puluhan Megabyte</p>
+                      </div>
+                    )}
+                  </label>
+                </div>
+              )}
 
               {/* Judul Buku Teks */}
               <div>
@@ -1659,28 +1714,28 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Target Halaman Buku (Sesuai Cetakan Buku)
+                    Tugas Membaca: Halaman Target
                   </label>
                   <input
                     type="number"
                     min="1"
-                    placeholder="Contoh: 45"
+                    placeholder="Contoh: 45 (Opsional)"
                     value={targetPage}
                     onChange={e => setTargetPage(e.target.value)}
                     className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                   />
-                  <p className="text-[10px] text-slate-400 mt-1">Nomor halaman yang tercetak di buku fisik (misal: 28).</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Siswa akan otomatis diarahkan ke halaman ini untuk tugas.</p>
                 </div>
               </div>
 
               {/* Deskripsi */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Deskripsi Ringkas
+                  Deskripsi Ringkas / Instruksi Guru
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="Rangkuman isi buku teks modul kurikulum..."
+                  placeholder="Rangkuman atau pesan instruksi untuk siswa (misal: Pelajari bab 3...)"
                   value={bookDesc}
                   onChange={e => setBookDesc(e.target.value)}
                   className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"

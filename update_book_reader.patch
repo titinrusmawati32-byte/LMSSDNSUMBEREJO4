@@ -1,0 +1,60 @@
+--- src/components/BookReaderModal.tsx
++++ src/components/BookReaderModal.tsx
+@@ -707,59 +707,6 @@
+           {/* Action & Reader Controls */}
+           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
+-            {/* Desktop Only Page Navigation Controls */}
+-            {!isMobile && (
+-              <div className="flex items-center bg-blue-50 px-2 py-1 rounded-xl border border-blue-200 text-xs">
+-                <button
+-                  onClick={() => setCurrentPage(1)}
+-                  disabled={currentPage <= 1 || isLoading}
+-                  className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
+-                  title="Halaman Pertama"
+-                >
+-                  <ChevronsLeft className="w-3.5 h-3.5" />
+-                </button>
+-                <button
+-                  onClick={handlePrevPage}
+-                  disabled={currentPage <= 1 || isLoading}
+-                  className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
+-                  title="Halaman Sebelumnya"
+-                >
+-                  <ChevronLeft className="w-4 h-4" />
+-                </button>
+-                
+-                <div className="flex items-center gap-1 mx-1 font-mono text-[11px] text-slate-700">
+-                  <input
+-                    type="text"
+-                    value={pageInputVal}
+-                    onChange={handlePageInputChange}
+-                    onKeyDown={handlePageInputKeyDown}
+-                    onBlur={() => setPageInputVal(currentPage.toString())}
+-                    disabled={isLoading}
+-                    className="w-10 text-center bg-slate-50 border border-slate-300 rounded py-0.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500"
+-                  />
+-                  <span className="text-slate-500">/ {totalDisplayPages}</span>
+-                </div>
+-
+-                <button
+-                  onClick={handleNextPage}
+-                  disabled={currentPage >= totalDisplayPages || isLoading}
+-                  className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
+-                  title="Halaman Selanjutnya"
+-                >
+-                  <ChevronRight className="w-4 h-4" />
+-                </button>
+-                <button
+-                  onClick={() => setCurrentPage(totalDisplayPages)}
+-                  disabled={currentPage >= totalDisplayPages || isLoading}
+-                  className="p-1 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer"
+-                  title="Halaman Terakhir"
+-                >
+-                  <ChevronsRight className="w-3.5 h-3.5" />
+-                </button>
+-              </div>
+-            )}
+-
+             {/* Zoom Controls (Desktop) */}
+             {!isMobile && (
+               <div className="flex items-center bg-blue-50 px-2 py-1 rounded-xl border border-blue-200">
