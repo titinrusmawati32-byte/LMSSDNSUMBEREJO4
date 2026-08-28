@@ -1373,7 +1373,7 @@ export async function forceSyncAllToCloud(): Promise<number> {
 
 export async function uploadLargeFileToFirestore(fileId: string, b64Data: string): Promise<number> {
   if (isQuotaExceeded) return 0;
-  const CHUNK_SIZE = 900000;
+  const CHUNK_SIZE = 800000;
   const chunks = Math.ceil(b64Data.length / CHUNK_SIZE);
   for (let i = 0; i < chunks; i++) {
     const chunkId = `${fileId}_chunk_${i}`;

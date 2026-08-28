@@ -344,11 +344,10 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
         await savePdfBlob(newId, matPdfFile, matPdfName || (cleanTitle + '.pdf'));
         fileUrlStr = `/uploads/${newId}.pdf`;
         const b64 = await convertFileToBase64(matPdfFile);
-        if (b64.length < 900000) {
+        if (b64.length < 800000) {
           fileDataStr = b64;
         } else {
-          calculatedChunks = Math.ceil(b64.length / 900000);
-          uploadLargeFileToFirestore(newId, b64).catch(err => console.warn('Firestore chunk upload note:', err));
+          calculatedChunks = await uploadLargeFileToFirestore(newId, b64);
         }
 
         // Upload to server asynchronously in the background
@@ -433,11 +432,10 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
 
         // 2. Convert base64 and process in background
         const b64 = await convertFileToBase64(bookPdfFile);
-        if (b64.length < 900000) {
+        if (b64.length < 800000) {
           fileDataStr = b64;
         } else {
-          calculatedChunks = Math.ceil(b64.length / 900000);
-          uploadLargeFileToFirestore(bookId, b64).catch(err => console.warn('Firestore chunk upload note:', err));
+          calculatedChunks = await uploadLargeFileToFirestore(bookId, b64);
         }
 
         // Upload to server asynchronously for cross-device support
