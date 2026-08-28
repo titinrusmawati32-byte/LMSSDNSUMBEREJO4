@@ -176,9 +176,9 @@ function fallbackParseQuiz(rawText: string, fileName?: string) {
 async function startServer() {
   const app = express();
 
-  // Increase payload limit for base64 file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+  // Increase payload limit for base64 file uploads (supporting high-resolution digital books)
+  app.use(express.json({ limit: "100mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
   // Ensure uploads directory exists and is statically served
   const uploadsDir = path.join(process.cwd(), "uploads");

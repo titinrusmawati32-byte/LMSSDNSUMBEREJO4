@@ -27,12 +27,14 @@
         "subject": { "type": "string" },
         "fileType": { "type": "string" },
         "fileSize": { "type": "string" },
+        "fileChunks": { "type": "number" },
         "uploadDate": { "type": "string" },
         "teacherName": { "type": "string" },
         "description": { "type": "string" },
         "downloadCount": { "type": "number" },
         "fileName": { "type": "string" },
-        "fileUrl": { "type": "string" }
+        "fileUrl": { "type": "string" },
+        "fileData": { "type": "string" }
       },
       "required": ["id", "title", "subject", "fileType", "fileSize", "uploadDate", "teacherName"]
     },
@@ -67,12 +69,28 @@
         "coverImage": { "type": "string" },
         "description": { "type": "string" },
         "fileSize": { "type": "string" },
+        "fileChunks": { "type": "number" },
         "rating": { "type": "number" },
         "readCount": { "type": "number" },
         "fileName": { "type": "string" },
-        "fileUrl": { "type": "string" }
+        "fileUrl": { "type": "string" },
+        "fileData": { "type": "string" },
+        "targetPage": { "type": "number" },
+        "uploadDate": { "type": "string" }
       },
-      "required": ["id", "title", "author", "subject", "totalPages", "coverImage", "description", "fileSize"]
+      "required": ["id", "title", "author", "subject", "coverImage", "description", "fileSize"]
+    },
+    "file_chunks": {
+      "title": "FileChunk",
+      "description": "Binary chunks for large uploaded files exceeding 1MB in Firestore",
+      "type": "object",
+      "properties": {
+        "fileId": { "type": "string" },
+        "index": { "type": "number" },
+        "totalChunks": { "type": "number" },
+        "data": { "type": "string" }
+      },
+      "required": ["fileId", "index", "data"]
     },
     "videos": {
       "title": "LearningVideo",

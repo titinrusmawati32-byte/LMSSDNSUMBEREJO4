@@ -291,6 +291,11 @@ export async function deleteMaterialFromDb(id: string) {
   markIdAsDeleted(id);
   try {
     await deleteDoc(doc(db, MATERIALS_COL, id));
+    // Clean up associated file chunks if any
+    for (let i = 0; i < 60; i++) {
+      const chunkId = `${id}_chunk_${i}`;
+      deleteDoc(doc(db, 'file_chunks', chunkId)).catch(() => {});
+    }
   } catch (err) {
     console.warn('deleteMaterialFromDb error:', err);
   }
@@ -379,6 +384,11 @@ export async function deleteBookFromDb(id: string) {
   markIdAsDeleted(id);
   try {
     await deleteDoc(doc(db, BOOKS_COL, id));
+    // Clean up associated file chunks if any
+    for (let i = 0; i < 60; i++) {
+      const chunkId = `${id}_chunk_${i}`;
+      deleteDoc(doc(db, 'file_chunks', chunkId)).catch(() => {});
+    }
   } catch (err) {
     console.warn('deleteBookFromDb error:', err);
   }

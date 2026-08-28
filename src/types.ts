@@ -108,6 +108,7 @@ export interface DigitalBook {
   fileUrl?: string;
   fileData?: string; // base64 or blob URL for uploaded PDF
   targetPage?: number;
+  uploadDate?: string;
 }
 
 export interface LearningVideo {
