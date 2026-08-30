@@ -2066,6 +2066,7 @@ export const SiswaDashboard: React.FC<SiswaDashboardProps> = ({
         onClose={() => setShowProfileModal(false)}
         onUpdateUser={onUpdateCurrentUser}
         onLogout={onLogout}
+        schoolSettings={schoolSettings}
       />
 
       {/* STICKY BOTTOM NAVIGATION BAR FOR MOBILE (HP) */}

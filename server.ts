@@ -180,10 +180,21 @@ async function startServer() {
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
-  // Ensure uploads directory exists and is statically served
-  const uploadsDir = path.join(process.cwd(), "uploads");
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
+  // Ensure uploads directory exists and is statically served (supports Vercel / serverless ephemeral /tmp fallback)
+  let uploadsDir = path.join(process.cwd(), "uploads");
+  try {
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    // Test write permission
+    fs.writeFileSync(path.join(uploadsDir, ".test"), "test");
+    fs.unlinkSync(path.join(uploadsDir, ".test"));
+  } catch (e) {
+    uploadsDir = path.join("/tmp", "uploads");
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    console.warn("Filesystem root is read-only. Using /tmp/uploads for server uploads.");
   }
   app.use("/uploads", express.static(uploadsDir));
 

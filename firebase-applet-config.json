@@ -1,12 +1,11 @@
 {
-  "projectId": "thermal-goal-m5xj8",
-  "appId": "1:338512046206:web:1e512af4cca2223e1f102f",
-  "apiKey": "AIzaSyDYcujCPw_PgPq3ccJC9tcTaHysc-8j6yQ",
-  "authDomain": "thermal-goal-m5xj8.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-remixremixremixl-a50c1cbd-0f48-41ce-be93-5a02110a37f9",
-  "storageBucket": "thermal-goal-m5xj8.firebasestorage.app",
-  "messagingSenderId": "338512046206",
+  "projectId": "gen-lang-client-0951576164",
+  "appId": "1:613766809158:web:e88f98e0db701c33286c47",
+  "apiKey": "AIzaSyA7YVDIeEGr7fXiMUECVcoC-jwVXjEhZ5A",
+  "authDomain": "gen-lang-client-0951576164.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0951576164.firebasestorage.app",
+  "messagingSenderId": "613766809158",
   "measurementId": "",
-  "oAuthClientId": "338512046206-d655hr9057mh3vj3thlds9v9qn0lsk0p.apps.googleusercontent.com",
+  "oAuthClientId": "613766809158-g0p1a42liajr7ph0m1vcgr9d7q665the.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

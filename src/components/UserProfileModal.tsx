@@ -4,17 +4,20 @@ import {
   User, Mail, Shield, Phone, School, KeyRound, Save, X, 
   CheckCircle2, Camera, Sparkles, BookOpen, Award, Clock,
   Calendar, Check, AlertCircle, RefreshCw, QrCode, Lock,
-  Upload, Image as ImageIcon, Trash2, CheckCircle, Info
+  Upload, Image as ImageIcon, Trash2, CheckCircle, Info,
+  FolderOpen, ExternalLink, FileSpreadsheet
 } from 'lucide-react';
-import { UserProfile } from '../types';
+import { UserProfile, SchoolSettings } from '../types';
 import { updateUserInDb } from '../lib/lmsDb';
 
 interface UserProfileModalProps {
   isOpen: boolean;
-  user: UserProfile;
+  user?: UserProfile;
+  currentUser?: UserProfile;
   onClose: () => void;
   onUpdateUser?: (updatedUser: UserProfile) => void;
   onLogout?: () => void;
+  schoolSettings?: SchoolSettings;
 }
 
 const PRESET_AVATARS = [
@@ -23,19 +26,26 @@ const PRESET_AVATARS = [
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   isOpen,
-  user,
+  user: userProp,
+  currentUser,
   onClose,
   onUpdateUser,
-  onLogout
+  onLogout,
+  schoolSettings
 }) => {
+  const user = userProp || currentUser;
   const isPrivileged = user?.role === 'admin' || user?.role === 'guru';
 
-  const [activeTab, setActiveTab] = useState<'info' | 'edit' | 'security' | 'card'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'edit' | 'security' | 'card' | 'gdrive'>('info');
   const [name, setName] = useState(user?.name || '');
   const [identifierNumber, setIdentifierNumber] = useState(user?.identifierNumber || '');
   const [departmentOrClass, setDepartmentOrClass] = useState(user?.departmentOrClass || '');
   const [phone, setPhone] = useState(user?.phone || '0812-3456-7890');
   const [avatar, setAvatar] = useState(user?.avatar || '');
+  const [gdriveUrl, setGdriveUrl] = useState(user?.gdriveUrl || '');
+  const [driveViewMode, setDriveViewMode] = useState<'sekolah' | 'pribadi'>(
+    schoolSettings?.gdriveUrl ? 'sekolah' : 'pribadi'
+  );
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [uploadSuccessMsg, setUploadSuccessMsg] = useState<string | null>(null);
 
@@ -51,6 +61,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       setDepartmentOrClass(user.departmentOrClass || '');
       setPhone(user.phone || '0812-3456-7890');
       setAvatar(user.avatar || '');
+      setGdriveUrl(user.gdriveUrl || '');
       if (user.role === 'admin') {
         setAdminUsername(localStorage.getItem('edusmart_admin_custom_username') || 'admin');
         setAdminPassword(localStorage.getItem('edusmart_admin_custom_password') || 'admin123');
@@ -178,7 +189,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       identifierNumber,
       departmentOrClass,
       phone,
-      avatar
+      avatar,
+      gdriveUrl
     };
 
     try {
@@ -371,6 +383,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               >
                 KTA Digital
               </button>
+              {(isPrivileged || schoolSettings?.gdriveUrl) && (
+                <button
+                  onClick={() => { setActiveTab('gdrive'); setShowAvatarPicker(false); }}
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                    activeTab === 'gdrive' ? 'bg-indigo-600 text-white shadow-sm font-semibold' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Google Drive
+                </button>
+              )}
             </div>
           </div>
 
@@ -607,6 +629,23 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
                   />
                 </div>
+
+                {isPrivileged && (
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <label className="text-xs font-semibold text-slate-300 flex items-center gap-1">
+                      <span>Link Google Drive Saya</span>
+                      <span className="text-[10px] text-emerald-400 font-normal">(Folder, Dokumen, atau Spreadsheet)</span>
+                    </label>
+                    <input
+                      type="url"
+                      value={gdriveUrl}
+                      onChange={(e) => setGdriveUrl(e.target.value)}
+                      placeholder="https://drive.google.com/drive/folders/..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                    <p className="text-[10px] text-slate-400">Tautan folder atau dokumen ini akan tersemat langsung pada tab Google Drive Akun Guru.</p>
+                  </div>
+                )}
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2">
@@ -818,6 +857,115 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <p className="text-xs text-slate-500 text-center">
                 Kartu identitas ini dapat digunakan untuk presensi mandiri dan verifikasi ujian sekolah.
               </p>
+            </div>
+          )}
+
+          {/* TAB 5: GOOGLE DRIVE GURU */}
+          {activeTab === 'gdrive' && (
+            <div className="space-y-4 h-full flex flex-col">
+              {/* Selector Mode (Sekolah vs Pribadi) if user is privileged and school drive exists */}
+              {isPrivileged && schoolSettings?.gdriveUrl && (
+                <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setDriveViewMode('sekolah')}
+                    className={`flex-1 text-xs font-bold py-2 rounded-lg transition-all ${driveViewMode === 'sekolah' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Google Drive Sekolah (Admin)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDriveViewMode('pribadi')}
+                    className={`flex-1 text-xs font-bold py-2 rounded-lg transition-all ${driveViewMode === 'pribadi' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Google Drive Pribadi Saya
+                  </button>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950 p-4 rounded-2xl border border-slate-800">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <FolderOpen className="w-4 h-4 text-emerald-400" />
+                    {driveViewMode === 'sekolah' ? 'Google Drive Sekolah' : 'Google Drive Pribadi'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {driveViewMode === 'sekolah' 
+                      ? 'Direktori folder, dokumen, dan modul utama sekolah dari Administrator.' 
+                      : 'Akses cepat ke materi, modul, dan spreadsheet perangkat pembelajaran Anda.'}
+                  </p>
+                </div>
+
+                {(driveViewMode === 'sekolah' ? schoolSettings?.gdriveUrl : gdriveUrl) && (
+                  <div className="flex items-center gap-2">
+                    {isPrivileged && driveViewMode === 'pribadi' && (
+                      <button
+                        onClick={() => setActiveTab('edit')}
+                        className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl text-xs font-semibold transition"
+                      >
+                        Ubah Link
+                      </button>
+                    )}
+                    <a
+                      href={driveViewMode === 'sekolah' ? schoolSettings?.gdriveUrl : gdriveUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-md shadow-indigo-600/20"
+                    >
+                      <span>Buka di Tab Baru</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {(driveViewMode === 'sekolah' ? schoolSettings?.gdriveUrl : gdriveUrl) ? (
+                <div className="flex-1 w-full h-[45vh] bg-slate-950 border border-slate-850 rounded-2xl overflow-hidden shadow-inner relative flex flex-col">
+                  <iframe
+                    src={(() => {
+                      const activeUrl = driveViewMode === 'sekolah' ? (schoolSettings?.gdriveUrl || '') : gdriveUrl;
+                      const folderMatch = activeUrl.match(/\/folders\/([a-zA-Z0-9-_]+)/);
+                      if (folderMatch && folderMatch[1]) {
+                        return `https://drive.google.com/embeddedfolderview?id=${folderMatch[1]}#grid`;
+                      }
+                      const fileMatch = activeUrl.match(/\/file\/d\/([a-zA-Z0-9-_]+)/);
+                      if (fileMatch && fileMatch[1]) {
+                        return `https://drive.google.com/file/d/${fileMatch[1]}/preview`;
+                      }
+                      const sheetsMatch = activeUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+                      if (sheetsMatch && sheetsMatch[1]) {
+                        return `https://docs.google.com/spreadsheets/d/${sheetsMatch[1]}/preview`;
+                      }
+                      return activeUrl;
+                    })()}
+                    className="w-full h-full border-0 bg-white"
+                    title="Google Drive Embed View"
+                    allow="autoplay"
+                  ></iframe>
+                </div>
+              ) : (
+                <div className="flex-1 py-12 px-6 bg-slate-950 border border-slate-850 rounded-2xl flex flex-col items-center justify-center text-center space-y-4">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-950/60 text-indigo-400 border border-indigo-900/40 flex items-center justify-center">
+                    <FileSpreadsheet className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1.5 max-w-sm">
+                    <h4 className="text-sm font-bold text-slate-200">Google Drive Belum Terhubung</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      {driveViewMode === 'sekolah' 
+                        ? 'Administrator belum menyetel Google Drive Utama Sekolah.' 
+                        : 'Atur link folder Google Drive, dokumen RPP, spreadsheet modul, atau modul ajar Anda di tab Edit Profil agar langsung tampil di sini.'}
+                    </p>
+                  </div>
+                  {isPrivileged && driveViewMode === 'pribadi' && (
+                    <button
+                      onClick={() => setActiveTab('edit')}
+                      className="px-4 py-2 bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-400 hover:text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      Atur Link Google Drive Sekarang
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

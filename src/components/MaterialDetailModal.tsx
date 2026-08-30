@@ -178,6 +178,15 @@ export const MaterialDetailModal: React.FC<MaterialDetailModalProps> = ({
           }
           pdfData = bytes.buffer;
         } else if (material.fileUrl && !material.fileUrl.startsWith('data:')) {
+          // Check if Google Drive link (bypass pdfjs to prevent CORS error and render correctly in iframe)
+          const parsedSource = resolvePdfSource(material.fileUrl, material.fileData);
+          if (parsedSource.type === 'gdrive' && parsedSource.embedUrl) {
+            setExternalSource(parsedSource);
+            setIsLoading(false);
+            setPdfDoc(null);
+            setNumPages(1); // Iframe views do not need PDF.js page counting
+            return;
+          }
           // 3. Remote URL
           pdfData = material.fileUrl;
         }

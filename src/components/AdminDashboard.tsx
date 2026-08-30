@@ -116,6 +116,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editSchoolTagline, setEditSchoolTagline] = useState(schoolSettings?.schoolTagline || '');
   const [editLogoUrl, setEditLogoUrl] = useState(schoolSettings?.logoUrl || '');
   const [editLoginBgUrl, setEditLoginBgUrl] = useState(schoolSettings?.loginBgUrl || '');
+  const [editGdriveUrl, setEditGdriveUrl] = useState(schoolSettings?.gdriveUrl || '');
   const [isSavingBranding, setIsSavingBranding] = useState(false);
 
   useEffect(() => {
@@ -124,6 +125,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setEditSchoolTagline(schoolSettings.schoolTagline || '');
       setEditLogoUrl(schoolSettings.logoUrl || '');
       setEditLoginBgUrl(schoolSettings.loginBgUrl || '');
+      setEditGdriveUrl(schoolSettings.gdriveUrl || '');
     }
   }, [schoolSettings]);
 
@@ -345,7 +347,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         schoolName: editSchoolName,
         schoolTagline: editSchoolTagline,
         logoUrl: editLogoUrl,
-        loginBgUrl: editLoginBgUrl
+        loginBgUrl: editLoginBgUrl,
+        gdriveUrl: editGdriveUrl
       });
       triggerToast('Identitas & Branding Sekolah berhasil diperbarui secara real-time!');
     } catch (err) {
@@ -1570,6 +1573,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </button>
                         </div>
                       </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">Link Google Drive Sekolah (Utama)</label>
+                        <input
+                          type="url"
+                          value={editGdriveUrl}
+                          onChange={(e) => setEditGdriveUrl(e.target.value)}
+                          placeholder="Contoh: https://drive.google.com/drive/folders/..."
+                          className="w-full bg-slate-850 border border-slate-700/60 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all placeholder-slate-500 font-mono"
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1.5">Tautan folder, dokumen, atau spreadsheet dari Admin yang diakses oleh semua Guru dan Siswa secara realtime.</p>
+                      </div>
                     </div>
 
                     {/* Right Column: Previews & Login Background */}
@@ -1671,6 +1686,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         setEditSchoolTagline(schoolSettings?.schoolTagline || 'Portal E-Learning & Manajemen Akademik');
                         setEditLogoUrl(schoolSettings?.logoUrl || '');
                         setEditLoginBgUrl(schoolSettings?.loginBgUrl || '');
+                        setEditGdriveUrl(schoolSettings?.gdriveUrl || '');
                         triggerToast('Perubahan dibatalkan & dikembalikan ke pengaturan saat ini.');
                       }}
                       className="cursor-pointer font-bold text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl px-5 py-3 transition-all disabled:opacity-50"
@@ -2298,6 +2314,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* Profile Modal */}
       {showProfileModal && (
         <UserProfileModal
+          isOpen={showProfileModal}
           currentUser={currentUser}
           onClose={() => setShowProfileModal(false)}
           onUpdateUser={(updated) => {
@@ -2305,6 +2322,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             setShowProfileModal(false);
             triggerToast('Profil administrator berhasil diperbarui.');
           }}
+          schoolSettings={schoolSettings}
         />
       )}
 

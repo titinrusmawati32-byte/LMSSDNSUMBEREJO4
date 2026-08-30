@@ -5,6 +5,7 @@ export const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
   schoolTagline: 'Portal E-Learning & Manajemen Akademik',
   logoUrl: 'https://lh3.googleusercontent.com/aida/AEtjO1V_O1LkqpNTKLUgY46lUQNZ-98AfOCi-LyzExN_kh011sCNAEG7gS1zMhoI0e9f5thxqvJIXWDLwNX18QdX6PlK24ANim_2_jj_Q6Z9Oa_KUxEcDW41TTC8NsyQysJsnq_E5CU0zsQRxSTqbhz7N5xF8G4OM26zdNzz5kRadSxlsfYxU26L07DfDphdMt7y-Yv-tJOIvogq6ozlFOeFUossp0VF8tSoOq4VClwC1f5b_JNLVjfk70mJ7Hc',
   loginBgUrl: '',
+  gdriveUrl: '',
   updatedAt: new Date().toISOString()
 };
 

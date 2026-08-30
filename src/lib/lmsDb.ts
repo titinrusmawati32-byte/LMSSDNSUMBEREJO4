@@ -10,7 +10,16 @@ import {
   disableNetwork,
   setLogLevel
 } from "firebase/firestore";
-import { db } from './firebase';
+import { db, storage } from './firebase';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { 
+  isGoogleSheetsEnabled, 
+  getSpreadsheetId, 
+  getSheetsAccessToken, 
+  fetchBooksFromGoogleSheets, 
+  syncBooksToGoogleSheets, 
+  addBookToGoogleSheets 
+} from './sheetsService';
 import { 
   LearningMaterial,
   QuizExam,
@@ -74,12 +83,12 @@ if (typeof window !== 'undefined') {
         localStorage.removeItem(QUOTA_EXCEEDED_KEY);
         localStorage.removeItem(QUOTA_TIMESTAMP_KEY);
         try {
-          setLogLevel('error');
+          setLogLevel('silent');
         } catch {}
       }
     } else {
       try {
-        setLogLevel('error');
+        setLogLevel('silent');
       } catch {}
     }
   } catch (e) {
@@ -356,6 +365,12 @@ export function subscribeMaterials(callback: (items: LearningMaterial[]) => void
   const initial = getLocalCache(MATERIALS_COL, MOCK_MATERIALS).filter(m => !deletedSet.has(m.id));
   callback(initial);
 
+  if (isQuotaExceeded) {
+    return () => {
+      localSubscribers['materials'].delete(callback);
+    };
+  }
+
   const q = query(collection(db, MATERIALS_COL));
   const unsub = onSnapshot(q, (snapshot) => {
     const currentDeleted = getDeletedIds();
@@ -388,8 +403,16 @@ export function subscribeMaterials(callback: (items: LearningMaterial[]) => void
   };
 }
 
+function getStorageUrl(id: string): string | null {
+  return storageUrls[id] || (typeof window !== 'undefined' ? localStorage.getItem(`edusmart_storage_url_${id}`) : null);
+}
+
 export async function addMaterialToDb(material: LearningMaterial) {
   unmarkIdAsDeleted(material.id);
+  const storageUrl = getStorageUrl(material.id);
+  if (storageUrl) {
+    material.fileUrl = storageUrl;
+  }
   const current = getLocalCache<LearningMaterial>(MATERIALS_COL, MOCK_MATERIALS).filter(m => m.id !== material.id);
   const updated = [material, ...current];
   setLocalCache(MATERIALS_COL, updated);
@@ -405,6 +428,10 @@ export async function addMaterialToDb(material: LearningMaterial) {
 
 export async function updateMaterialInDb(material: LearningMaterial) {
   unmarkIdAsDeleted(material.id);
+  const storageUrl = getStorageUrl(material.id);
+  if (storageUrl) {
+    material.fileUrl = storageUrl;
+  }
   const current = getLocalCache<LearningMaterial>(MATERIALS_COL, MOCK_MATERIALS);
   const index = current.findIndex(m => m.id === material.id);
   let updated: LearningMaterial[];
@@ -452,6 +479,12 @@ export function subscribeQuizzes(callback: (items: QuizExam[]) => void) {
   const deletedSet = getDeletedIds();
   const initial = getLocalCache(QUIZZES_COL, MOCK_QUIZZES).filter(q => !deletedSet.has(q.id));
   callback(initial);
+
+  if (isQuotaExceeded) {
+    return () => {
+      localSubscribers['quizzes'].delete(callback);
+    };
+  }
 
   const q = query(collection(db, QUIZZES_COL));
   const unsub = onSnapshot(q, (snapshot) => {
@@ -544,6 +577,37 @@ export function subscribeBooks(callback: (items: DigitalBook[]) => void) {
   const initial = getLocalCache(BOOKS_COL, MOCK_BOOKS).filter(b => !deletedSet.has(b.id));
   callback(initial);
 
+  // Async load from Google Sheets if enabled
+  if (isGoogleSheetsEnabled()) {
+    const spreadsheetId = getSpreadsheetId();
+    if (spreadsheetId) {
+      getSheetsAccessToken().then(token => {
+        if (token) {
+          fetchBooksFromGoogleSheets(spreadsheetId, token)
+            .then(books => {
+              const currentDeleted = getDeletedIds();
+              const activeBooks = books.filter(b => !currentDeleted.has(b.id));
+              setLocalCache(BOOKS_COL, activeBooks);
+              callback(activeBooks);
+            })
+            .catch(err => {
+              console.warn('Gagal memuat buku dari Google Sheets:', err);
+            });
+        }
+      }).catch(() => {});
+    }
+    // Return unsubscribe function for local subscriber
+    return () => {
+      localSubscribers['books'].delete(callback);
+    };
+  }
+
+  if (isQuotaExceeded) {
+    return () => {
+      localSubscribers['books'].delete(callback);
+    };
+  }
+
   const q = query(collection(db, BOOKS_COL));
   const unsub = onSnapshot(q, (snapshot) => {
     const currentDeleted = getDeletedIds();
@@ -576,10 +640,27 @@ export function subscribeBooks(callback: (items: DigitalBook[]) => void) {
 
 export async function addBookToDb(book: DigitalBook) {
   unmarkIdAsDeleted(book.id);
+  const storageUrl = getStorageUrl(book.id);
+  if (storageUrl) {
+    book.fileUrl = storageUrl;
+  }
   const current = getLocalCache<DigitalBook>(BOOKS_COL, MOCK_BOOKS).filter(b => b.id !== book.id);
   const updated = [book, ...current];
   setLocalCache(BOOKS_COL, updated);
   notifyLocalSubscribers('books', updated);
+
+  if (isGoogleSheetsEnabled()) {
+    try {
+      const spreadsheetId = getSpreadsheetId();
+      const token = await getSheetsAccessToken();
+      if (spreadsheetId && token) {
+        await addBookToGoogleSheets(spreadsheetId, token, book);
+      }
+    } catch (err) {
+      console.error('Gagal menambahkan buku ke Google Sheets:', err);
+    }
+    return;
+  }
 
   if (isQuotaExceeded) return;
   try {
@@ -591,6 +672,10 @@ export async function addBookToDb(book: DigitalBook) {
 
 export async function updateBookInDb(book: DigitalBook) {
   unmarkIdAsDeleted(book.id);
+  const storageUrl = getStorageUrl(book.id);
+  if (storageUrl) {
+    book.fileUrl = storageUrl;
+  }
   const current = getLocalCache<DigitalBook>(BOOKS_COL, MOCK_BOOKS);
   const index = current.findIndex(b => b.id === book.id);
   let updated: DigitalBook[];
@@ -602,6 +687,19 @@ export async function updateBookInDb(book: DigitalBook) {
   }
   setLocalCache(BOOKS_COL, updated);
   notifyLocalSubscribers('books', updated);
+
+  if (isGoogleSheetsEnabled()) {
+    try {
+      const spreadsheetId = getSpreadsheetId();
+      const token = await getSheetsAccessToken();
+      if (spreadsheetId && token) {
+        await syncBooksToGoogleSheets(spreadsheetId, token, updated);
+      }
+    } catch (err) {
+      console.error('Gagal memperbarui buku di Google Sheets:', err);
+    }
+    return;
+  }
 
   if (isQuotaExceeded) return;
   try {
@@ -617,6 +715,19 @@ export async function deleteBookFromDb(id: string) {
   const updated = current.filter(b => b.id !== id);
   setLocalCache(BOOKS_COL, updated);
   notifyLocalSubscribers('books', updated);
+
+  if (isGoogleSheetsEnabled()) {
+    try {
+      const spreadsheetId = getSpreadsheetId();
+      const token = await getSheetsAccessToken();
+      if (spreadsheetId && token) {
+        await syncBooksToGoogleSheets(spreadsheetId, token, updated);
+      }
+    } catch (err) {
+      console.error('Gagal menghapus buku dari Google Sheets:', err);
+    }
+    return;
+  }
 
   if (isQuotaExceeded) return;
   try {
@@ -638,6 +749,12 @@ export function subscribeVideos(callback: (items: LearningVideo[]) => void) {
   const deletedSet = getDeletedIds();
   const initial = getLocalCache(VIDEOS_COL, MOCK_VIDEOS).filter(v => !deletedSet.has(v.id));
   callback(initial);
+
+  if (isQuotaExceeded) {
+    return () => {
+      localSubscribers['videos'].delete(callback);
+    };
+  }
 
   const q = query(collection(db, VIDEOS_COL));
   const unsub = onSnapshot(q, (snapshot) => {
@@ -730,6 +847,12 @@ export function subscribeUsers(callback: (items: UserProfile[]) => void) {
   const initial = getLocalCache(USERS_COL, MOCK_USERS).filter(u => !deletedSet.has(u.id) && !OLD_DEFAULT_USER_IDS.includes(u.id));
   callback(initial);
 
+  if (isQuotaExceeded) {
+    return () => {
+      localSubscribers['users'].delete(callback);
+    };
+  }
+
   const q = query(collection(db, USERS_COL));
   const unsub = onSnapshot(q, (snapshot) => {
     const currentDeleted = getDeletedIds();
@@ -799,9 +922,18 @@ export async function updateUserInDb(user: UserProfile) {
 
   if (isQuotaExceeded) return;
   try {
-    await setDoc(doc(db, USERS_COL, user.id), cleanData(user), { merge: true });
+    const remotePromise = setDoc(doc(db, USERS_COL, user.id), cleanData(user), { merge: true })
+      .catch(err => {
+        handleFirestoreError(err, 'updateUserInDb_background');
+      });
+
+    // Gunakan race dengan timeout 400ms agar UI merespon secara instan
+    await Promise.race([
+      remotePromise,
+      new Promise((resolve) => setTimeout(resolve, 400))
+    ]);
   } catch (err) {
-    handleFirestoreError(err, 'updateUserInDb');
+    console.warn('Firestore write slow or delayed, saved to local cache:', err);
   }
 }
 
@@ -828,6 +960,12 @@ export function subscribeAnnouncements(callback: (items: SystemAnnouncement[]) =
   const deletedSet = getDeletedIds();
   const initial = getLocalCache(ANNOUNCEMENTS_COL, MOCK_ANNOUNCEMENTS).filter(a => !deletedSet.has(a.id));
   callback(initial);
+
+  if (isQuotaExceeded) {
+    return () => {
+      localSubscribers['announcements'].delete(callback);
+    };
+  }
 
   const q = query(collection(db, ANNOUNCEMENTS_COL));
   const unsub = onSnapshot(q, (snapshot) => {
@@ -918,6 +1056,12 @@ export function subscribeAttendance(callback: (items: AttendanceRecord[]) => voi
   localSubscribers['attendance'].add(callback);
   callback(getLocalCache<AttendanceRecord>(ATTENDANCE_COL, []));
 
+  if (isQuotaExceeded) {
+    return () => {
+      localSubscribers['attendance'].delete(callback);
+    };
+  }
+
   const q = query(collection(db, ATTENDANCE_COL));
   const unsub = onSnapshot(q, (snapshot) => {
     const items: AttendanceRecord[] = [];
@@ -966,6 +1110,12 @@ export function subscribeSchedules(callback: (items: ClassSchedule[]) => void) {
   const deletedSet = getDeletedIds();
   const initial = getLocalCache(SCHEDULES_COL, MOCK_SCHEDULES).filter(s => !deletedSet.has(s.id));
   callback(initial);
+
+  if (isQuotaExceeded) {
+    return () => {
+      localSubscribers['schedules'].delete(callback);
+    };
+  }
 
   const q = query(collection(db, SCHEDULES_COL));
   const unsub = onSnapshot(q, (snapshot) => {
@@ -1056,6 +1206,12 @@ export function subscribeSubmissions(callback: (items: StudentQuizSubmission[]) 
   localSubscribers['submissions'].add(callback);
   callback(getLocalCache<StudentQuizSubmission>(SUBMISSIONS_COL, []));
 
+  if (isQuotaExceeded) {
+    return () => {
+      localSubscribers['submissions'].delete(callback);
+    };
+  }
+
   const q = query(collection(db, SUBMISSIONS_COL));
   const unsub = onSnapshot(q, (snapshot) => {
     const items: StudentQuizSubmission[] = [];
@@ -1136,6 +1292,10 @@ export function subscribeStudentProgress(
   const localInitial = getLocalStudentProgress(studentId);
   callback(localInitial);
 
+  if (isQuotaExceeded) {
+    return () => {};
+  }
+
   const docRef = doc(db, STUDENT_PROGRESS_COL, studentId);
   return onSnapshot(docRef, (snapshot) => {
     if (snapshot.exists()) {
@@ -1215,7 +1375,8 @@ export function getLocalSchoolSettings(): SchoolSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_LOCAL_KEY);
     if (!raw) return DEFAULT_SCHOOL_SETTINGS;
-    return { ...DEFAULT_SCHOOL_SETTINGS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_SCHOOL_SETTINGS, ...parsed };
   } catch {
     return DEFAULT_SCHOOL_SETTINGS;
   }
@@ -1239,6 +1400,12 @@ export function saveLocalSchoolSettings(settings: SchoolSettings) {
 export function subscribeSchoolSettings(callback: (settings: SchoolSettings) => void) {
   localSubscribers['settings'].add(callback);
   callback(getLocalSchoolSettings());
+
+  if (isQuotaExceeded) {
+    return () => {
+      localSubscribers['settings'].delete(callback);
+    };
+  }
 
   const docRef = doc(db, SETTINGS_COL, 'school_settings');
   const unsub = onSnapshot(docRef, (snapshot) => {
@@ -1274,9 +1441,18 @@ export async function updateSchoolSettingsInDb(newSettings: Partial<SchoolSettin
 
   if (isQuotaExceeded) return;
   try {
-    await setDoc(doc(db, SETTINGS_COL, 'school_settings'), cleanData(updated), { merge: true });
+    const remotePromise = setDoc(doc(db, SETTINGS_COL, 'school_settings'), cleanData(updated), { merge: true })
+      .catch(err => {
+        handleFirestoreError(err, 'updateSchoolSettingsInDb_background');
+      });
+
+    // Gunakan race dengan timeout 400ms agar UI merespon secara instan
+    await Promise.race([
+      remotePromise,
+      new Promise((resolve) => setTimeout(resolve, 400))
+    ]);
   } catch (err) {
-    handleFirestoreError(err, 'updateSchoolSettingsInDb');
+    console.warn('Firestore write slow or delayed, saved to local cache:', err);
   }
 }
 
@@ -1418,8 +1594,31 @@ export async function forceSyncAllToCloud(): Promise<number> {
   return count;
 }
 
+const storageUrls: Record<string, string> = {};
+
 export async function uploadLargeFileToFirestore(fileId: string, b64Data: string): Promise<number> {
   if (isQuotaExceeded) return 0;
+
+  // Try Firebase Storage first (zero database costs, extremely fast streaming)
+  try {
+    const storageRef = ref(storage, `pdfs/${fileId}.pdf`);
+    await uploadString(storageRef, b64Data, 'data_url');
+    const downloadUrl = await getDownloadURL(storageRef);
+    storageUrls[fileId] = downloadUrl;
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`edusmart_storage_url_${fileId}`, downloadUrl);
+      } catch (e) {
+        console.warn('Failed to set localStorage URL for', fileId, e);
+      }
+    }
+    console.log('[EduSmart LMS] Successfully uploaded PDF to Firebase Storage:', downloadUrl);
+    return -999; // Special chunk count token indicating Firebase Storage
+  } catch (storageErr) {
+    console.warn('[EduSmart LMS] Firebase Storage upload failed, falling back to Firestore chunks:', storageErr);
+  }
+
+  // Fallback to traditional Firestore chunks if Storage is unavailable
   const CHUNK_SIZE = 800000;
   const chunks = Math.ceil(b64Data.length / CHUNK_SIZE);
   for (let i = 0; i < chunks; i++) {
@@ -1440,6 +1639,25 @@ export async function uploadLargeFileToFirestore(fileId: string, b64Data: string
 }
 
 export async function downloadLargeFileFromFirestore(fileId: string, chunks: number): Promise<string> {
+  // If the special -999 token is used, retrieve directly from Firebase Storage
+  if (chunks === -999) {
+    try {
+      const cachedUrl = storageUrls[fileId] || (typeof window !== 'undefined' ? localStorage.getItem(`edusmart_storage_url_${fileId}`) : null);
+      const url = cachedUrl || await getDownloadURL(ref(storage, `pdfs/${fileId}.pdf`));
+      
+      const response = await fetch(url);
+      const blob = await response.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (err) {
+      console.error('[EduSmart LMS] Failed to download PDF from Firebase Storage, trying fallback chunks:', err);
+    }
+  }
+
   let fullB64 = '';
   for (let i = 0; i < chunks; i++) {
     const chunkId = `${fileId}_chunk_${i}`;

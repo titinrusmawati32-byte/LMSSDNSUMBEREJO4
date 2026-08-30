@@ -29,6 +29,18 @@ import { UserProfileModal } from './UserProfileModal';
 import { GuruScheduleManager } from './GuruScheduleManager';
 import { FeatureHeaderBanner } from './FeatureHeaderBanner';
 import { savePdfBlob } from '../lib/pdfStorage';
+import {
+  isGoogleSheetsEnabled,
+  setGoogleSheetsEnabled,
+  getSpreadsheetId,
+  setSpreadsheetId,
+  signInWithGoogleSheets,
+  createDigitalBooksSpreadsheet,
+  fetchBooksFromGoogleSheets,
+  syncBooksToGoogleSheets,
+  uploadFileToGoogleDrive,
+  fetchFilesFromGoogleDrive
+} from '../lib/sheetsService';
 
 interface GuruDashboardProps {
   currentUser: UserProfile;
@@ -119,6 +131,18 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
   const [showBookModal, setShowBookModal] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
   const [selectedDocForReader, setSelectedDocForReader] = useState<DigitalBook | LearningMaterial | null>(null);
+  
+  // Google Sheets integration state
+  const [sheetsEnabled, setSheetsEnabledState] = useState(() => isGoogleSheetsEnabled());
+  const [spreadsheetId, setSpreadsheetIdState] = useState(() => getSpreadsheetId() || '');
+  const [isConnectingSheets, setIsConnectingSheets] = useState(false);
+  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
+  const [sheetsInputId, setSheetsInputId] = useState(() => getSpreadsheetId() || '');
+  const [sheetsMessage, setSheetsMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+  
+
+
   const [selectedMaterialDetail, setSelectedMaterialDetail] = useState<LearningMaterial | null>(null);
   const [selectedVideoForPlay, setSelectedVideoForPlay] = useState<LearningVideo | null>(null);
 
@@ -341,34 +365,34 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
 
     try {
       if (matStorageType === 'file' && matPdfFile) {
+        // 1. Instantly save raw File Blob into browser IndexedDB (instantaneous)
         await savePdfBlob(newId, matPdfFile, matPdfName || (cleanTitle + '.pdf'));
         fileUrlStr = `/uploads/${newId}.pdf`;
-        const b64 = await convertFileToBase64(matPdfFile);
-        if (b64.length < 800000) {
-          fileDataStr = b64;
-        } else {
-          calculatedChunks = await uploadLargeFileToFirestore(newId, b64);
-        }
 
-        // Upload to server asynchronously in the background
-        fetch('/api/upload-pdf', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fileBase64: b64,
-            fileName: matPdfFile.name,
-            id: newId
-          })
-        }).catch(err => console.warn('Background server upload note:', err));
+        // 2. Process base64 and server upload in the background (non-blocking)
+        convertFileToBase64(matPdfFile).then(async (b64) => {
+          if (b64.length < 800000) {
+            // Optional: update if needed
+          } else {
+            await uploadLargeFileToFirestore(newId, b64);
+          }
+          fetch('/api/upload-pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileBase64: b64,
+              fileName: matPdfFile.name,
+              id: newId
+            })
+          }).catch(err => console.warn('Background server upload note:', err));
+        }).catch(err => console.warn('Background processing note:', err));
       }
 
-      if (matStorageType === 'url' || matStorageType === 'gdrive') {
+      if (matStorageType === 'url') {
         fileUrlStr = matCloudUrl;
       }
       
-      let finalStorageType: 'file' | 'url' | 'gdrive' = 'file';
-      if (matStorageType === 'gdrive') finalStorageType = 'gdrive';
-      if (matStorageType === 'url') finalStorageType = 'url';
+      const finalStorageType: 'file' | 'url' = matStorageType;
 
       const newMat: LearningMaterial = {
         id: newId,
@@ -408,6 +432,123 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
     }
   };
 
+  // Google Sheets integration handlers
+  const handleConnectGoogleSheets = async () => {
+    setIsConnectingSheets(true);
+    setSheetsMessage(null);
+    
+    // Set a safety timeout to prevent getting stuck if popup is blocked by browser or iframe constraints
+    const safetyTimeout = setTimeout(() => {
+      setIsConnectingSheets(false);
+      setSheetsMessage({
+        text: 'Koneksi tertunda terlalu lama. Ini biasanya terjadi karena browser Anda memblokir jendela pop-up (Popup Blocker) atau membatasi cookie pihak ketiga di dalam iframe AI Studio. Harap periksa ikon pemblokir pop-up di bilah alamat browser Anda (biasanya di kanan atas), izinkan pop-up untuk situs ini, lalu coba klik tombol kembali.',
+        type: 'error'
+      });
+      triggerToast('Koneksi tertunda: Izinkan pop-up di browser Anda.');
+    }, 15000);
+
+    try {
+      const result = await signInWithGoogleSheets();
+      clearTimeout(safetyTimeout);
+      
+      if (result) {
+        let sheetId = sheetsInputId.trim();
+        if (!sheetId) {
+          // Auto-create spreadsheet if none was inputted
+          sheetId = await createDigitalBooksSpreadsheet(result.accessToken);
+          setSheetsInputId(sheetId);
+        } else {
+          setSpreadsheetId(sheetId);
+        }
+        setSpreadsheetIdState(sheetId);
+        setSheetsEnabledState(true);
+        setGoogleSheetsEnabled(true);
+        
+        // Load books from Google Sheets to verify and sync
+        const booksFromSheets = await fetchBooksFromGoogleSheets(sheetId, result.accessToken);
+        if (booksFromSheets && booksFromSheets.length > 0) {
+          booksFromSheets.forEach(b => onAddBook(b));
+          setSheetsMessage({ 
+            text: `Berhasil terhubung! Memuat ${booksFromSheets.length} buku digital dari Google Sheets.`, 
+            type: 'success' 
+          });
+        } else {
+          // Push local books to the new spreadsheet
+          await syncBooksToGoogleSheets(sheetId, result.accessToken, books);
+          setSheetsMessage({ 
+            text: 'Spreadsheet baru berhasil dibuat dan disinkronkan dengan data lokal!', 
+            type: 'success' 
+          });
+        }
+        triggerToast('Integrasi Google Sheets berhasil diaktifkan!');
+      }
+    } catch (err: any) {
+      clearTimeout(safetyTimeout);
+      console.error('Sheets integration error:', err);
+      
+      // Provide actionable feedback for blocked popup / iframe security
+      let errMsg = err?.message || 'Gagal menyambungkan Google Sheets.';
+      if (err?.code === 'auth/popup-blocked') {
+        errMsg = 'Pemberitahuan: Jendela pop-up masuk diblokir oleh browser Anda. Silakan klik ikon pemblokir pop-up di bilah alamat browser Anda untuk mengizinkannya, lalu klik hubungkan kembali.';
+      } else if (err?.code === 'auth/popup-closed-by-user') {
+        errMsg = 'Proses masuk dibatalkan karena Anda menutup jendela login Google. Silakan klik "Hubungkan Google Sheets" kembali dan selesaikan login Anda.';
+      } else if (err?.code === 'auth/network-request-failed') {
+        errMsg = 'Koneksi gagal. Silakan periksa koneksi internet Anda atau coba muat ulang halaman.';
+      }
+      
+      setSheetsMessage({ text: errMsg, type: 'error' });
+      triggerToast('Koneksi dibatalkan');
+    } finally {
+      setIsConnectingSheets(false);
+    }
+  };
+
+  const handleManualSyncSheets = async () => {
+    setIsSyncingSheets(true);
+    setSheetsMessage(null);
+    try {
+      const result = await signInWithGoogleSheets();
+      if (result) {
+        const sheetId = spreadsheetId || sheetsInputId.trim();
+        if (!sheetId) {
+          throw new Error('Spreadsheet ID belum diatur.');
+        }
+        await syncBooksToGoogleSheets(sheetId, result.accessToken, books);
+        setSheetsMessage({ text: 'Seluruh data buku digital berhasil disinkronkan ke Google Sheets!', type: 'success' });
+        triggerToast('Sinkronisasi Google Sheets selesai!');
+      }
+    } catch (err: any) {
+      console.error('Sheets sync error:', err);
+      let errMsg = err?.message || 'Gagal melakukan sinkronisasi.';
+      if (err?.code === 'auth/popup-closed-by-user') {
+        errMsg = 'Sinkronisasi dibatalkan karena jendela otorisasi Google ditutup. Silakan coba klik tombol kembali dan selesaikan otorisasi.';
+      } else if (err?.code === 'auth/popup-blocked') {
+        errMsg = 'Pemberitahuan: Jendela pop-up otentikasi diblokir oleh browser Anda. Silakan izinkan pop-up di browser Anda.';
+      }
+      setSheetsMessage({ text: errMsg, type: 'error' });
+      triggerToast('Sinkronisasi dibatalkan');
+    } finally {
+      setIsSyncingSheets(false);
+    }
+  };
+
+  const handleDisconnectSheets = () => {
+    setShowDisconnectConfirm(true);
+  };
+
+  const confirmDisconnectSheets = () => {
+    setGoogleSheetsEnabled(false);
+    setSheetsEnabledState(false);
+    setSpreadsheetId(null);
+    setSpreadsheetIdState('');
+    setSheetsInputId('');
+    setSheetsMessage({ text: 'Integrasi Google Sheets dinonaktifkan.', type: 'success' });
+    triggerToast('Google Sheets dinonaktifkan');
+    setShowDisconnectConfirm(false);
+  };
+
+
+
   // Submit Handler: Buku Digital PDF
   const handleAddBookSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -426,31 +567,30 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
       let detectedPages: number = 10;
 
       if (bookStorageType === 'file' && bookPdfFile) {
-        // 1. Instantly save raw File Blob into browser IndexedDB (handles 100+ MBs instantaneously)
+        // 1. Instantly save raw File Blob into browser IndexedDB (instantaneous)
         await savePdfBlob(bookId, bookPdfFile, bookPdfName || (cleanTitle + '.pdf'));
         fileUrlStr = `/uploads/${bookId}.pdf`;
 
-        // 2. Convert base64 and process in background
-        const b64 = await convertFileToBase64(bookPdfFile);
-        if (b64.length < 800000) {
-          fileDataStr = b64;
-        } else {
-          calculatedChunks = await uploadLargeFileToFirestore(bookId, b64);
-        }
-
-        // Upload to server asynchronously for cross-device support
-        fetch('/api/upload-pdf', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fileBase64: b64,
-            fileName: bookPdfFile.name,
-            id: bookId
-          })
-        }).catch(err => console.warn('Background server upload note:', err));
+        // 2. Process base64 and server upload in the background (non-blocking)
+        convertFileToBase64(bookPdfFile).then(async (b64) => {
+          if (b64.length < 800000) {
+            // Optional: update if needed
+          } else {
+            await uploadLargeFileToFirestore(bookId, b64);
+          }
+          fetch('/api/upload-pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileBase64: b64,
+              fileName: bookPdfFile.name,
+              id: bookId
+            })
+          }).catch(err => console.warn('Background server upload note:', err));
+        }).catch(err => console.warn('Background processing note:', err));
       }
 
-      if (bookStorageType === 'url' || bookStorageType === 'gdrive') {
+      if (bookStorageType === 'url') {
         fileUrlStr = bookCloudUrl;
       }
 
@@ -459,9 +599,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
         ? parsedTargetPage
         : undefined;
 
-      let finalStorageType: 'file' | 'url' | 'gdrive' = 'file';
-      if (bookStorageType === 'gdrive') finalStorageType = 'gdrive';
-      if (bookStorageType === 'url') finalStorageType = 'url';
+      const finalStorageType: 'file' | 'url' = bookStorageType;
 
       const newBk: DigitalBook = {
         id: bookId,
@@ -1083,6 +1221,8 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
                   </button>
                 </div>
 
+
+
                 {books.length === 0 ? (
                   <div className="text-center py-12 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800">
                     <Book className="w-10 h-10 text-slate-600 mx-auto mb-2" />
@@ -1610,27 +1750,25 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
             <form onSubmit={handleAddBookSubmit} className="flex-1 overflow-y-auto custom-scrollbar smooth-scroll pr-1.5 space-y-4">
               {/* Dropzone File PDF or Link Input */}
               <div className="flex bg-slate-950/60 p-1 rounded-xl mb-3">
-                <button type="button" onClick={() => setBookStorageType('file')} className={`flex-1 text-[11px] font-semibold py-2 rounded-lg transition ${bookStorageType === 'file' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>File Upload (Max 1MB)</button>
-                <button type="button" onClick={() => setBookStorageType('gdrive')} className={`flex-1 text-[11px] font-semibold py-2 rounded-lg transition ${bookStorageType === 'gdrive' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>Google Drive Link</button>
+                <button type="button" onClick={() => setBookStorageType('file')} className={`flex-1 text-[11px] font-semibold py-2 rounded-lg transition ${bookStorageType === 'file' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>File Upload</button>
                 <button type="button" onClick={() => setBookStorageType('url')} className={`flex-1 text-[11px] font-semibold py-2 rounded-lg transition ${bookStorageType === 'url' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>Direct URL</button>
               </div>
 
-              {bookStorageType !== 'file' ? (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    URL / Link {bookStorageType === 'gdrive' ? 'Google Drive' : 'File (Publik)'}
-                  </label>
-                  <input
-                    type="url"
-                    required
-                    placeholder={bookStorageType === 'gdrive' ? "https://drive.google.com/file/d/..." : "https://contoh.com/file.pdf"}
-                    value={bookCloudUrl}
-                    onChange={e => setBookCloudUrl(e.target.value)}
-                    className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                  />
-                  {bookStorageType === 'gdrive' && (
-                    <p className="text-[10px] text-slate-400 mt-1.5">Pastikan akses link Google Drive diatur ke <strong>"Siapa saja yang memiliki link"</strong> (Viewer).</p>
-                  )}
+              {bookStorageType === 'url' ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      URL / Link File (Publik)
+                    </label>
+                    <input
+                      type="url"
+                      required
+                      placeholder="https://contoh.com/file.pdf"
+                      value={bookCloudUrl}
+                      onChange={e => setBookCloudUrl(e.target.value)}
+                      className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
                 </div>
               ) : (
                 <div>
@@ -1790,26 +1928,50 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
             </div>
 
             <form onSubmit={handleAddMaterialSubmit} className="flex-1 overflow-y-auto custom-scrollbar smooth-scroll pr-1.5 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Unggah Berkas PDF Materi</label>
-                <label className="border-2 border-dashed border-slate-700/80 hover:border-blue-500/60 rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer bg-slate-950/40 transition group">
-                  <input type="file" accept=".pdf" onChange={handleMatPdfChange} className="hidden" />
-                  {matPdfFile ? (
-                    <div className="text-center space-y-1">
-                      <div className="w-10 h-10 rounded-xl bg-blue-950/80 text-blue-400 flex items-center justify-center mx-auto border border-blue-700/50">
-                        <FileText className="w-5 h-5" />
-                      </div>
-                      <p className="text-xs font-bold text-white truncate max-w-xs">{matPdfName}</p>
-                      <span className="text-[10px] text-emerald-400 font-medium bg-emerald-950/60 px-2 py-0.5 rounded">Ukuran: {matFileSize}</span>
-                    </div>
-                  ) : (
-                    <div className="text-center space-y-1">
-                      <UploadCloud className="w-8 h-8 text-slate-500 group-hover:text-blue-400 mx-auto transition" />
-                      <p className="text-xs font-semibold text-slate-300">Pilih berkas PDF bahan ajar</p>
-                    </div>
-                  )}
-                </label>
+              {/* Dropzone File PDF or Link Input */}
+              <div className="flex bg-slate-950/60 p-1 rounded-xl mb-3">
+                <button type="button" onClick={() => setMatStorageType('file')} className={`flex-1 text-[11px] font-semibold py-2 rounded-lg transition ${matStorageType === 'file' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>File Upload</button>
+                <button type="button" onClick={() => setMatStorageType('url')} className={`flex-1 text-[11px] font-semibold py-2 rounded-lg transition ${matStorageType === 'url' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>Direct URL</button>
               </div>
+
+              {matStorageType === 'url' ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      URL / Link File (Publik)
+                    </label>
+                    <input
+                      type="url"
+                      required
+                      placeholder="https://contoh.com/file.pdf"
+                      value={matCloudUrl}
+                      onChange={e => setMatCloudUrl(e.target.value)}
+                      className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">Unggah Berkas PDF Materi</label>
+                  <label className="border-2 border-dashed border-slate-700/80 hover:border-blue-500/60 rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer bg-slate-950/40 transition group">
+                    <input type="file" accept=".pdf" onChange={handleMatPdfChange} className="hidden" />
+                    {matPdfFile ? (
+                      <div className="text-center space-y-1">
+                        <div className="w-10 h-10 rounded-xl bg-blue-950/80 text-blue-400 flex items-center justify-center mx-auto border border-blue-700/50">
+                          <FileText className="w-5 h-5" />
+                        </div>
+                        <p className="text-xs font-bold text-white truncate max-w-xs">{matPdfName}</p>
+                        <span className="text-[10px] text-emerald-400 font-medium bg-emerald-950/60 px-2 py-0.5 rounded">Ukuran: {matFileSize}</span>
+                      </div>
+                    ) : (
+                      <div className="text-center space-y-1">
+                        <UploadCloud className="w-8 h-8 text-slate-500 group-hover:text-blue-400 mx-auto transition" />
+                        <p className="text-xs font-semibold text-slate-300">Pilih berkas PDF bahan ajar</p>
+                      </div>
+                    )}
+                  </label>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Judul Bahan Ajar <span className="text-rose-400">*</span></label>
@@ -2236,7 +2398,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
         />
       )}
 
-      {showProfileModal && (
+       {showProfileModal && (
         <UserProfileModal
           isOpen={showProfileModal}
           user={currentUser}
@@ -2245,6 +2407,7 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
             if (onUpdateCurrentUser) onUpdateCurrentUser(up);
             setShowProfileModal(false);
           }}
+          schoolSettings={schoolSettings}
         />
       )}
 
@@ -2265,6 +2428,42 @@ export const GuruDashboard: React.FC<GuruDashboardProps> = ({
           targetType={successDeletedTarget.type}
           onClose={() => setSuccessDeletedTarget(null)}
         />
+      )}
+
+      {showDisconnectConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-sm p-6 shadow-2xl text-slate-200 relative text-center space-y-4"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-rose-950/80 text-rose-400 flex items-center justify-center mx-auto border border-rose-800/40">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-base font-bold text-white">Putuskan Google Sheets?</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Apakah Anda yakin ingin menonaktifkan integrasi Google Sheets? Penyimpanan data akan dialihkan kembali ke database cloud lokal/Firebase.
+              </p>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDisconnectConfirm(false)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={confirmDisconnectSheets}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                Ya, Putuskan
+              </button>
+            </div>
+          </motion.div>
+        </div>
       )}
     </div>
   );

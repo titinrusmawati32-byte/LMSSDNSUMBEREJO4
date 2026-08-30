@@ -1,5 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, setLogLevel } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
+import { getAuth } from 'firebase/auth';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
 // Support both embedded configuration and Vercel/production environment variables
@@ -10,7 +12,7 @@ const projectId = env.VITE_FIREBASE_PROJECT_ID || firebaseConfigData?.projectId 
 const storageBucket = env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigData?.storageBucket || '';
 const messagingSenderId = env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigData?.messagingSenderId || '';
 const appId = env.VITE_FIREBASE_APP_ID || firebaseConfigData?.appId || '';
-const rawDatabaseId = env.VITE_FIREBASE_DATABASE_ID || firebaseConfigData?.firestoreDatabaseId || '';
+const rawDatabaseId = env.VITE_FIREBASE_DATABASE_ID || (firebaseConfigData as any)?.firestoreDatabaseId || '';
 
 const firebaseConfig = {
   apiKey,
@@ -28,6 +30,13 @@ const databaseId = rawDatabaseId && rawDatabaseId !== '(default)'
   : undefined;
 
 export const db = getFirestore(app, databaseId);
+try {
+  setLogLevel('silent');
+} catch (e) {
+  console.warn('Failed to set Firestore log level to silent:', e);
+}
+export const storage = getStorage(app);
+export const auth = getAuth(app);
 export default app;
 
 

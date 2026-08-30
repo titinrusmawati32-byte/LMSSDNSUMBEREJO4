@@ -11,6 +11,7 @@ export interface UserProfile {
   lastLogin?: string;
   status: 'active' | 'inactive';
   password?: string;
+  gdriveUrl?: string;
 }
 
 export interface SystemAnnouncement {
@@ -167,6 +168,7 @@ export interface SchoolSettings {
   logoUrl?: string;
   loginBgUrl?: string;
   updatedAt?: string;
+  gdriveUrl?: string;
 }
 
 export interface ContentLearningProgress {

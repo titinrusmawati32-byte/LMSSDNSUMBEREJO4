@@ -30,7 +30,8 @@ import {
   addScheduleToDb,
   updateScheduleInDb,
   deleteScheduleFromDb,
-  updateUserInDb
+  updateUserInDb,
+  isFirestoreQuotaExceeded
 } from './lib/lmsDb';
 
 export default function App() {
@@ -86,7 +87,7 @@ export default function App() {
 
   // Persistence & Real-time 2: Real-time active listener for the logged-in user profile
   useEffect(() => {
-    if (!currentUser?.id) return;
+    if (!currentUser?.id || isFirestoreQuotaExceeded()) return;
     const docRef = doc(db, 'users', currentUser.id);
     const unsub = onSnapshot(docRef, (snapshot) => {
       if (snapshot.exists()) {
