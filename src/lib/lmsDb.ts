@@ -279,11 +279,10 @@ export async function seedInitialDataIfEmpty() {
 
   try {
     const usersSnap = await getDocs(collection(db, USERS_COL));
-    if (usersSnap.empty) {
-      for (const item of MOCK_USERS) {
-        if (!deletedSet.has(item.id) && !OLD_DEFAULT_USER_IDS.includes(item.id)) {
-          await setDoc(doc(db, USERS_COL, item.id), cleanData(item));
-        }
+    const existingIds = new Set(usersSnap.docs.map(d => d.id));
+    for (const item of MOCK_USERS) {
+      if (!deletedSet.has(item.id) && !OLD_DEFAULT_USER_IDS.includes(item.id) && !existingIds.has(item.id)) {
+        await setDoc(doc(db, USERS_COL, item.id), cleanData(item));
       }
     }
     localStorage.setItem(SEED_FLAG_KEY, 'true');
@@ -856,11 +855,12 @@ export function subscribeUsers(callback: (items: UserProfile[]) => void) {
   const q = query(collection(db, USERS_COL));
   const unsub = onSnapshot(q, (snapshot) => {
     const currentDeleted = getDeletedIds();
-    const items: UserProfile[] = [];
+    const firestoreUsersMap = new Map<string, UserProfile>();
+    
     snapshot.forEach((doc) => {
       const data = doc.data() as UserProfile;
       if (data && data.id && !currentDeleted.has(data.id) && !OLD_DEFAULT_USER_IDS.includes(data.id)) {
-        items.push({
+        firestoreUsersMap.set(data.id, {
           ...data,
           role: data.role || 'siswa',
           name: data.name || 'Pengguna',
@@ -871,14 +871,21 @@ export function subscribeUsers(callback: (items: UserProfile[]) => void) {
         });
       }
     });
-    if (items.length > 0) {
-      setLocalCache(USERS_COL, items);
-      callback(items);
-    } else if (snapshot.empty) {
-      callback(MOCK_USERS.filter(u => !currentDeleted.has(u.id) && !OLD_DEFAULT_USER_IDS.includes(u.id)));
-    } else {
-      callback([]);
-    }
+
+    const mergedMap = new Map<string, UserProfile>();
+    MOCK_USERS.forEach(u => {
+      if (!currentDeleted.has(u.id) && !OLD_DEFAULT_USER_IDS.includes(u.id)) {
+        mergedMap.set(u.id, u);
+      }
+    });
+
+    firestoreUsersMap.forEach((user, id) => {
+      mergedMap.set(id, user);
+    });
+
+    const items = Array.from(mergedMap.values());
+    setLocalCache(USERS_COL, items);
+    callback(items);
   }, (err) => {
     handleFirestoreError(err, 'users_subscribe');
     const currentDeleted = getDeletedIds();
