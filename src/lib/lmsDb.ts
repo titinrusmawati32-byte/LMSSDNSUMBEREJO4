@@ -898,6 +898,32 @@ export function subscribeUsers(callback: (items: UserProfile[]) => void) {
   };
 }
 
+export async function fetchAllUsersFromCloud(): Promise<UserProfile[]> {
+  try {
+    const snapshot = await getDocs(collection(db, USERS_COL));
+    const currentDeleted = getDeletedIds();
+    const users: UserProfile[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as UserProfile;
+      if (data && data.id && !currentDeleted.has(data.id) && !OLD_DEFAULT_USER_IDS.includes(data.id)) {
+        users.push({
+          ...data,
+          role: data.role || 'siswa',
+          name: data.name || 'Pengguna',
+          identifierNumber: data.identifierNumber || '',
+          email: data.email || '',
+          avatar: data.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250',
+          status: data.status || 'active'
+        });
+      }
+    });
+    return users;
+  } catch (err) {
+    handleFirestoreError(err, 'fetchAllUsersFromCloud');
+    return [];
+  }
+}
+
 export async function addUserToDb(user: UserProfile) {
   unmarkIdAsDeleted(user.id);
   const current = getLocalCache<UserProfile>(USERS_COL, MOCK_USERS).filter(u => u.id !== user.id);

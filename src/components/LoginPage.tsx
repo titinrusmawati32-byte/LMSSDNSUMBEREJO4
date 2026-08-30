@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { UserRole, UserProfile, SchoolSettings } from '../types';
 import { MOCK_USERS } from '../data/mockData';
+import { fetchAllUsersFromCloud } from '../lib/lmsDb';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
 import { HelpSupportModal } from './HelpSupportModal';
 
@@ -43,7 +44,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     return activeRole === 'siswa' ? 'NISN Siswa' : activeRole === 'guru' ? 'NIP Guru' : 'NIP / Username Admin';
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!identifierInput.trim() || !passwordInput.trim()) {
       setErrorMessage(`Harap isi ${getRoleLabel()} dan Kata Sandi.`);
@@ -53,10 +54,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setErrorMessage('');
     setIsLoading(true);
 
-    setTimeout(() => {
-      setIsLoading(false);
-      // Use real-time Firestore server users pool (allUsers)
-      const pool = (allUsers || []).filter((u): u is UserProfile => Boolean(u && u.role));
+    try {
+      // Fetch fresh users directly from cloud Firestore to ensure cross-device sync immediately
+      const cloudUsers = await fetchAllUsersFromCloud();
+      const poolMap = new Map<string, UserProfile>();
+      
+      MOCK_USERS.forEach(u => {
+        if (!['usr-2', 'usr-3', 'usr-4', 'usr-5'].includes(u.id)) {
+          poolMap.set(u.id, u);
+        }
+      });
+      (allUsers || []).forEach(u => {
+        if (u && u.id) poolMap.set(u.id, u);
+      });
+      cloudUsers.forEach(u => {
+        if (u && u.id) poolMap.set(u.id, u);
+      });
+
+      const pool = Array.from(poolMap.values()).filter((u): u is UserProfile => Boolean(u && u.role));
       const trimmedId = identifierInput.trim().toLowerCase();
       const trimmedPass = passwordInput.trim();
 
@@ -93,9 +108,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             status: 'active' as const
           };
           adminUser.identifierNumber = trimmedId === (masterUsername || '').toLowerCase() ? masterUsername : customUsername;
+          setIsLoading(false);
           onLoginSuccess(adminUser);
           return;
         } else {
+          setIsLoading(false);
           setErrorMessage('Username atau password administrator tidak cocok.');
           return;
         }
@@ -109,6 +126,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         )
       );
 
+      setIsLoading(false);
       if (foundUser) {
         if (foundUser.status === 'inactive') {
           setErrorMessage('Akun ini telah dinonaktifkan atau dihapus oleh Administrator.');
@@ -124,7 +142,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           `Akun ${activeRole === 'guru' ? 'Guru' : 'Siswa'} dengan identitas "${identifierInput.trim()}" belum digenerate oleh Admin atau telah dihapus dari server.`
         );
       }
-    }, 500);
+    } catch (err) {
+      setIsLoading(false);
+      setErrorMessage('Terjadi kesalahan koneksi server. Silakan coba lagi.');
+    }
   };
 
   return (
