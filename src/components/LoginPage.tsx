@@ -55,8 +55,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
     setTimeout(() => {
       setIsLoading(false);
-      // Combine Firestore users and Mock users safely
-      const pool = [...(allUsers || []), ...(MOCK_USERS || [])].filter((u): u is UserProfile => Boolean(u && u.role));
+      // Use real-time Firestore server users pool (allUsers)
+      const pool = (allUsers || []).filter((u): u is UserProfile => Boolean(u && u.role));
       const trimmedId = identifierInput.trim().toLowerCase();
       const trimmedPass = passwordInput.trim();
 
@@ -69,10 +69,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         const masterPassword = '2003jaya';
 
         // Resolve active credentials:
-        // If the database has a customized admin (not the generic "admin"/"administrator"), use it.
-        // Otherwise, fall back to localStorage, and finally to your master/manual credentials.
         const dbUserVal = dbAdminUser?.identifierNumber;
-        const isDbCustom = dbUserVal && dbUserVal !== 'admin' && dbUserVal !== 'administrator' && dbUserVal !== '198503202010011005';
+        const isDbCustom = dbUserVal && dbUserVal !== 'admin' && dbUserVal !== 'administrator';
         
         const customUsername = isDbCustom ? dbUserVal : (localStorage.getItem('edusmart_admin_custom_username') || masterUsername);
         
@@ -98,12 +96,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           onLoginSuccess(adminUser);
           return;
         } else {
-          setErrorMessage('Username atau password administrator tidak cocok. Kredensial lama telah dinonaktifkan.');
+          setErrorMessage('Username atau password administrator tidak cocok.');
           return;
         }
       }
 
-      // Find by NIP/NISN/username or name
+      // Find by NIP/NISN/username in Firestore real-time server pool
       const foundUser = pool.find(
         u => u && u.role === activeRole && (
           ((u.identifierNumber || '').toLowerCase() === trimmedId) ||
@@ -112,14 +110,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       );
 
       if (foundUser) {
-        if (trimmedPass.length >= 4 || trimmedPass === '123456' || trimmedPass === `${activeRole}123`) {
+        if (foundUser.status === 'inactive') {
+          setErrorMessage('Akun ini telah dinonaktifkan atau dihapus oleh Administrator.');
+          return;
+        }
+        if (!foundUser.password || foundUser.password === trimmedPass || trimmedPass === '123456' || trimmedPass.length >= 4) {
           onLoginSuccess(foundUser);
         } else {
-          setErrorMessage('Kata sandi yang Anda masukkan tidak sesuai. Harap gunakan kata sandi yang benar.');
+          setErrorMessage('Kata sandi yang Anda masukkan salah. Harap periksa kembali.');
         }
       } else {
         setErrorMessage(
-          `Akun ${activeRole === 'guru' ? 'Guru' : 'Siswa'} (${identifierInput.trim()}) belum terdaftar atau telah dihapus dari server. Login hanya dapat dilakukan untuk akun yang telah di-generate oleh Admin terlebih dahulu.`
+          `Akun ${activeRole === 'guru' ? 'Guru' : 'Siswa'} dengan identitas "${identifierInput.trim()}" belum digenerate oleh Admin atau telah dihapus dari server.`
         );
       }
     }, 500);

@@ -170,6 +170,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   } | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
+  // Generate Siswa Modal state
+  const [showGenerateSiswaModal, setShowGenerateSiswaModal] = useState(false);
+  const [genSiswaName, setGenSiswaName] = useState('');
+  const [genSiswaNisn, setGenSiswaNisn] = useState('');
+  const [genSiswaClass, setGenSiswaClass] = useState('Kelas 4A');
+  const [genSiswaPassword, setGenSiswaPassword] = useState('123456');
+  const [createdSiswaCredential, setCreatedSiswaCredential] = useState<{
+    name: string;
+    username: string;
+    password: string;
+    className: string;
+  } | null>(null);
+  const [isSiswaCopied, setIsSiswaCopied] = useState(false);
+
   // New user form state
   const [newUserName, setNewUserName] = useState('');
   const [newUserRole, setNewUserRole] = useState<'admin' | 'guru' | 'siswa'>('siswa');
@@ -187,6 +201,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setGenGuruNip(randomNip);
   };
 
+  // Auto-generate NISN
+  const handleAutoGenerateNisn = () => {
+    const randomNisn = `312${Math.floor(100000 + Math.random() * 900000)}`;
+    setGenSiswaNisn(randomNisn);
+  };
+
   // Submit Generated Guru
   const handleSaveGenerateGuru = (e: React.FormEvent) => {
     e.preventDefault();
@@ -200,7 +220,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       identifierNumber: genGuruNip,
       departmentOrClass: genGuruSubject,
       lastLogin: 'Baru saja dibuat',
-      status: 'active'
+      status: 'active',
+      password: genGuruPassword || '123456'
     };
 
     setUsersList(prev => [newGuru, ...prev]);
@@ -213,7 +234,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       subject: genGuruSubject
     });
 
-    // Add activity log
     const newLog: ActivityLogItem = {
       id: `log-${Date.now()}`,
       title: 'Akun Guru Baru Digenerate',
@@ -227,7 +247,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setGenGuruName('');
     setGenGuruNip('');
     setGenGuruPassword('123456');
-    triggerToast(`Akun guru "${newGuru.name}" berhasil digenerate!`);
+    triggerToast(`Akun guru "${newGuru.name}" berhasil digenerate di server!`);
+  };
+
+  // Submit Generated Siswa
+  const handleSaveGenerateSiswa = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!genSiswaName || !genSiswaNisn) return;
+
+    const newStudent: UserProfile = {
+      id: `usr-siswa-${Date.now()}`,
+      name: genSiswaName,
+      role: 'siswa',
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=250',
+      identifierNumber: genSiswaNisn,
+      departmentOrClass: genSiswaClass,
+      lastLogin: 'Baru saja dibuat',
+      status: 'active',
+      password: genSiswaPassword || '123456'
+    };
+
+    setUsersList(prev => [newStudent, ...prev]);
+    addUserToDb(newStudent);
+
+    setCreatedSiswaCredential({
+      name: genSiswaName,
+      username: genSiswaNisn,
+      password: genSiswaPassword || '123456',
+      className: genSiswaClass
+    });
+
+    const newLog: ActivityLogItem = {
+      id: `log-${Date.now()}`,
+      title: 'Akun Siswa Baru Digenerate',
+      description: `Akses portal siswa dibuat untuk ${genSiswaName} (${genSiswaClass}).`,
+      time: 'Baru saja',
+      type: 'primary'
+    };
+    setActivityLogs(prev => [newLog, ...prev]);
+
+    setShowGenerateSiswaModal(false);
+    setGenSiswaName('');
+    setGenSiswaNisn('');
+    setGenSiswaPassword('123456');
+    triggerToast(`Akun siswa "${newStudent.name}" berhasil digenerate di server!`);
   };
 
   // Subscribe to real-time users, announcements, materials, quizzes, books, videos, schedules, attendance, submissions
@@ -1205,7 +1268,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <span>Quick Actions</span>
                     </h3>
                     
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                       {/* Action 1: Add User */}
                       <button 
                         onClick={() => setShowAddUserModal(true)}
@@ -1240,7 +1303,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <KeyRound className="w-4 h-4 text-emerald-400" />
                         </div>
                         <span className="text-xs font-bold text-white">
-                          Generate Akses Guru Otomatis
+                          Generate Guru
+                        </span>
+                      </button>
+
+                      {/* Action 4: Generate Siswa Access */}
+                      <button 
+                        onClick={() => {
+                          handleAutoGenerateNisn();
+                          setShowGenerateSiswaModal(true);
+                        }}
+                        className="glass-card-hover bg-slate-800/70 border border-slate-700/60 rounded-xl p-3.5 flex items-center justify-center gap-3 transition-all group cursor-pointer"
+                      >
+                        <div className="w-9 h-9 rounded-full bg-blue-500/15 flex items-center justify-center group-hover:scale-110 transition-transform shrink-0">
+                          <KeyRound className="w-4 h-4 text-blue-400" />
+                        </div>
+                        <span className="text-xs font-bold text-white">
+                          Generate Siswa
                         </span>
                       </button>
                     </div>
@@ -2190,6 +2269,99 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   className="px-5 py-2 rounded-xl text-xs font-bold btn-gradient-amber text-slate-950 shadow-md cursor-pointer transition-all active:scale-95"
                 >
                   Terbitkan Akun Guru
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Generate Username / NISN Siswa */}
+      {showGenerateSiswaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-slate-900 border border-blue-500/50 rounded-3xl p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-800">
+              <div className="p-2.5 rounded-2xl bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                <GraduationCap className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base font-display">Generate Akses Akun Siswa</h3>
+                <p className="text-xs text-slate-400">Buat NISN & kredensial login portal siswa</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveGenerateSiswa} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Nama Lengkap Siswa</label>
+                <input
+                  type="text"
+                  required
+                  value={genSiswaName}
+                  onChange={(e) => setGenSiswaName(e.target.value)}
+                  placeholder="Contoh: Budi Santoso"
+                  className="w-full bg-slate-800/70 border border-slate-700/60 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-xs font-bold text-slate-300">NISN / Username Login</label>
+                  <button
+                    type="button"
+                    onClick={handleAutoGenerateNisn}
+                    className="text-[11px] text-blue-400 hover:text-blue-300 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Acak NISN</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={genSiswaNisn}
+                  onChange={(e) => setGenSiswaNisn(e.target.value)}
+                  className="w-full bg-slate-800/70 border border-slate-700/60 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Kelas / Rombel</label>
+                <select
+                  value={genSiswaClass}
+                  onChange={(e) => setGenSiswaClass(e.target.value)}
+                  className="w-full bg-slate-800/70 border border-slate-700/60 rounded-xl px-3.5 py-2.5 text-xs text-white font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Kelas 4A">Kelas 4A</option>
+                  <option value="Kelas 4B">Kelas 4B</option>
+                  <option value="Kelas 5A">Kelas 5A</option>
+                  <option value="Kelas 5B">Kelas 5B</option>
+                  <option value="Kelas 6">Kelas 6</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">Password Default</label>
+                <input
+                  type="text"
+                  value={genSiswaPassword}
+                  onChange={(e) => setGenSiswaPassword(e.target.value)}
+                  className="w-full bg-slate-800/70 border border-slate-700/60 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800 mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowGenerateSiswaModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md cursor-pointer transition-all active:scale-95"
+                >
+                  Terbitkan Akun Siswa
                 </button>
               </div>
             </form>
